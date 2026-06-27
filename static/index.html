@@ -123,9 +123,103 @@
         }
         .main-article-item {
             padding: 10px 12px !important;
+            transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease !important;
+            border-left: 3px solid transparent !important;
+        }
+        .main-article-item:hover {
+            background: linear-gradient(90deg, rgba(96, 165, 250, 0.12) 0%, rgba(96, 165, 250, 0.04) 100%) !important;
+            border-left-color: #60a5fa !important;
+            box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.15) !important;
         }
         .main-article-header {
             padding: 10px 12px !important;
+        }
+
+        /* ===== 全局通用样式：数据行 hover、操作按钮、空状态、状态标签 ===== */
+        .data-row {
+            transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+            border-left: 3px solid transparent;
+        }
+        .data-row:hover {
+            background: linear-gradient(90deg, rgba(96, 165, 250, 0.12) 0%, rgba(96, 165, 250, 0.04) 100%) !important;
+            border-left-color: #60a5fa !important;
+            box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.15);
+        }
+        .action-icon-btn {
+            padding: 6px 10px;
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            background: rgba(30, 41, 59, 0.8);
+            color: #cbd5e1;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .action-icon-btn.edit:hover {
+            background: rgba(96, 165, 250, 0.15);
+            border-color: rgba(96, 165, 250, 0.5);
+            color: #60a5fa;
+        }
+        .action-icon-btn.delete:hover {
+            background: rgba(239, 68, 68, 0.15);
+            border-color: rgba(239, 68, 68, 0.5);
+            color: #f87171;
+        }
+        .empty-state-card {
+            text-align: center;
+            padding: 48px 24px;
+            color: #64748b;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px dashed rgba(148, 163, 184, 0.15);
+            border-radius: 12px;
+        }
+        .empty-state-card i {
+            font-size: 40px;
+            color: #475569;
+            margin-bottom: 12px;
+            display: block;
+        }
+        .empty-state-card p {
+            font-size: 14px;
+            margin: 4px 0 0;
+        }
+        .status-pill {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .status-pill.shipped { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
+        .status-pill.unshipped { background: rgba(96, 165, 250, 0.15); color: #60a5fa; }
+        /* 分页按钮统一样式 */
+        .page-btn {
+            padding: 6px 12px;
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            background: rgba(30, 41, 59, 0.8);
+            color: #cbd5e1;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s ease;
+        }
+        .page-btn:hover:not(:disabled) {
+            background: rgba(96, 165, 250, 0.1);
+            border-color: rgba(96, 165, 250, 0.3);
+            color: #60a5fa;
+        }
+        .page-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+        .page-btn.active {
+            background: #60a5fa;
+            border-color: #60a5fa;
+            color: white;
+            font-weight: 600;
         }
         
         /* 确保代码块在预览模式中也有高亮 */
@@ -406,8 +500,7 @@
         .stats-bar {
             display: flex;
             gap: 12px;
-            flex: 1;
-            justify-content: center;
+            justify-content: flex-start;
         }
         .stat-item {
             background: rgba(255,255,255,0.05);
@@ -441,8 +534,8 @@
             font-weight: 600;
         }
         .user-avatar {
-            width: 36px;
-            height: 36px;
+            width: 44px;
+            height: 44px;
             border-radius: 50%;
             background: linear-gradient(135deg, #60a5fa 0%, #a78bfa 100%);
             display: flex;
@@ -450,7 +543,7 @@
             justify-content: center;
             color: white;
             font-weight: 600;
-            font-size: 14px;
+            font-size: 18px;
             box-shadow: 0 4px 12px rgba(96, 165, 250, 0.3);
         }
         .user-name {
@@ -473,12 +566,12 @@
             background: rgba(30, 41, 59, 0.6);
             backdrop-filter: blur(10px);
             border: 1px solid rgba(148, 163, 184, 0.1);
-            border-radius: 20px;
-            padding: 20px;
-            margin-bottom: 20px;
+            border-radius: 14px;
+            padding: 12px 14px;
+            margin-bottom: 10px;
         }
         .sidebar-section h3 {
-            margin-bottom: 18px;
+            margin-bottom: 10px;
             font-size: 15px;
             font-weight: 600;
             color: #94a3b8;
@@ -512,10 +605,10 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 12px 14px;
+            padding: 8px 12px;
             border-radius: 10px;
             cursor: pointer;
-            margin-bottom: 6px;
+            margin-bottom: 3px;
             transition: all 0.2s ease;
             background: rgba(30, 41, 59, 0.8);
             border: 1px solid rgba(148, 163, 184, 0.1);
@@ -529,6 +622,13 @@
         .category-item.active {
             background: linear-gradient(135deg, rgba(96, 165, 250, 0.2) 0%, rgba(139, 92, 246, 0.2) 100%);
             border: 1px solid rgba(96, 165, 250, 0.3);
+        }
+        .category-item.active .category-name {
+            color: #e2e8f0;
+            font-weight: 600;
+        }
+        .category-item.active .category-dot {
+            box-shadow: 0 0 14px currentColor;
         }
         .category-left {
             display: flex;
@@ -1266,6 +1366,22 @@
             background: rgba(255,255,255,0.08);
             box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.1);
         }
+
+        /* 日期选择器适配深色主题：原生日历图标改为浅色，弹出的日历面板跟随深色 */
+        input[type="date"],
+        input[type="month"] {
+            color-scheme: dark;
+        }
+        input[type="date"]::-webkit-calendar-picker-indicator,
+        input[type="month"]::-webkit-calendar-picker-indicator {
+            filter: invert(0.8) sepia(1) saturate(3) hue-rotate(190deg);
+            cursor: pointer;
+            opacity: 0.9;
+        }
+        input[type="date"]::-webkit-calendar-picker-indicator:hover,
+        input[type="month"]::-webkit-calendar-picker-indicator:hover {
+            opacity: 1;
+        }
         .form-group textarea {
             min-height: 280px;
             resize: vertical;
@@ -1306,8 +1422,8 @@
             gap: 12px;
         }
         .user-avatar {
-            width: 32px;
-            height: 32px;
+            width: 44px;
+            height: 44px;
             border-radius: 50%;
             background: #60a5fa;
             display: flex;
@@ -1315,7 +1431,7 @@
             justify-content: center;
             color: white;
             font-weight: 600;
-            font-size: 14px;
+            font-size: 18px;
         }
         .user-name {
             color: #f8fafc;
@@ -1349,11 +1465,6 @@
 <body>
     <header class="header">
         <h1><i class="fa fa-cube" style="margin-right: 8px;"></i>Echo</h1>
-        <div class="stats-bar">
-            <div class="stat-item">文章 <span id="statArticles">0</span></div>
-            <div class="stat-item">收藏 <span id="statFavorites">0</span></div>
-            <div class="stat-item">浏览 <span id="statViews">0</span></div>
-        </div>
         <div class="user-info" id="userInfo">
             <button class="btn btn-secondary" onclick="openLoginModal()">登录</button>
         </div>
@@ -1416,9 +1527,14 @@
         </aside>
 
         <main class="content-area">
+            <div class="stats-bar" id="articlesStatsBar" style="display:none; margin-bottom:16px; padding:0 4px;">
+                <div class="stat-item">日报 <span id="statArticles">0</span></div>
+                <div class="stat-item">收藏 <span id="statFavorites">0</span></div>
+                <div class="stat-item">浏览 <span id="statViews">0</span></div>
+            </div>
             <div class="toolbar">
                 <div class="search-box">
-                    <input type="text" id="searchInput" placeholder="搜索文章..." onkeypress="handleSearch(event)">
+                    <input type="text" id="searchInput" placeholder="搜索日报..." onkeypress="handleSearch(event)">
                     <button class="search-btn" onclick="handleSearch()">
                         <i class="fa fa-search"></i>
                     </button>
@@ -1527,11 +1643,11 @@
                 <input type="hidden" id="kiwiSaleId">
                 <div class="form-group">
                     <label>客户名 *</label>
-                    <input type="text" id="kiwiCustomerName" required placeholder="请输入客户名">
+                    <input type="text" id="kiwiCustomerName" required>
                 </div>
                 <div class="form-group">
                     <label>电话 *</label>
-                    <input type="text" id="kiwiPhone" required placeholder="请输入电话号码">
+                    <input type="text" id="kiwiPhone" required>
                 </div>
                 <div class="form-group">
                     <label>地址 *</label>
@@ -1763,6 +1879,13 @@
         let editingId = null;
         let easyMDE = null;
 
+        // 缓存当前渲染的文章列表，供删除等操作按 id 查分类
+        let renderedArticlesCache = [];
+        // 分类为「工作日报」时，UI 文案中的「文章」显示为「日报」
+        function articleTerm(category) {
+            return category === '工作日报' ? '日报' : '文章';
+        }
+
         let user = null; // 当前登录用户
         let currentPage = 1;
         let pageSize = 5;
@@ -1784,7 +1907,7 @@
                     const displayName = user.name || user.username;
                     let avatarHtml = '';
                     if (user.avatar) {
-                        avatarHtml = `<div class="user-avatar" style="width: 32px; height: 32px; border-radius: 50%; background: url(${user.avatar}) no-repeat center center / cover; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;"></div>`;
+                        avatarHtml = `<div class="user-avatar" style="width: 44px; height: 44px; border-radius: 50%; background: url(${user.avatar}) no-repeat center center / cover; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;"></div>`;
                     } else {
                         avatarHtml = `<div class="user-avatar">${displayName.charAt(0).toUpperCase()}</div>`;
                     }
@@ -2264,8 +2387,9 @@
 
         function renderArticles(articles) {
             const articleList = document.getElementById('articleList');
+            renderedArticlesCache = articles || [];
             if (articles.length === 0) {
-                articleList.innerHTML = '<div class="empty-state"><h3>暂无文章</h3><p>点击"新增"按钮开始创建</p></div>';
+                articleList.innerHTML = `<div class="empty-state-card"><i class="fa fa-inbox"></i><p>暂无${articleTerm(currentCategory)}，点击「新增」开始创建</p></div>`;
                 return;
             }
             
@@ -2273,53 +2397,59 @@
             const startIndex = (currentPage - 1) * pageSize + 1;
             
             articleList.innerHTML = `
-                <div class="main-article-header" style="display: flex; align-items: center; padding: 6px 10px; background: rgba(15, 23, 42, 0.5); border-bottom: 1px solid rgba(148, 163, 184, 0.1); border-radius: 8px 8px 0 0; width: 100%;">
-                    <div class="main-header-checkbox" style="flex: 0.5; text-align: center; font-weight: 500; color: #94a3b8; font-size: 12px;">
+                <div class="main-article-header" style="display: flex; align-items: center; padding: 10px 12px; background: rgba(15, 23, 42, 0.8); border-bottom: 1px solid rgba(148, 163, 184, 0.15); border-radius: 8px 8px 0 0; width: 100%;">
+                    <div class="main-header-checkbox" style="flex: 0.5; text-align: center; font-weight: 600; color: #cbd5e1; font-size: 13px;">
                         <input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll(this)" style="margin: 0;">
                     </div>
-                    <div class="main-header-index" style="flex: 1; text-align: center; font-weight: 500; color: #94a3b8; font-size: 12px;">序号</div>
-                    <div class="main-header-title" style="flex: 1.5; font-weight: 500; color: #94a3b8; font-size: 12px; text-align: left; padding: 0 5px;">标题</div>
-                    <div class="main-header-category" style="flex: 1; font-weight: 500; color: #94a3b8; font-size: 12px; text-align: center;">分类</div>
-                    <div class="main-header-date" style="flex: 1; font-weight: 500; color: #94a3b8; font-size: 12px; text-align: center;">发布时间</div>
-                    <div class="main-header-views" style="flex: 1; font-weight: 500; color: #94a3b8; font-size: 12px; text-align: center;">阅读次数</div>
-                    <div class="main-header-actions" style="flex: 1; font-weight: 500; color: #94a3b8; font-size: 12px; text-align: center;">操作</div>
+                    <div class="main-header-index" style="flex: 1; text-align: center; font-weight: 600; color: #cbd5e1; font-size: 13px;">序号</div>
+                    <div class="main-header-title" style="flex: 1.5; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: left; padding: 0 5px;">标题</div>
+                    <div class="main-header-category" style="flex: 1; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">分类</div>
+                    <div class="main-header-date" style="flex: 1; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">发布时间</div>
+                    <div class="main-header-views" style="flex: 1; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">阅读次数</div>
+                    <div class="main-header-actions" style="flex: 1; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">操作</div>
                 </div>
             ` + articles.map((article, index) => {
                 const articleIndex = startIndex + index;
                 return `
-                <div class="main-article-item" data-id="${article.id}" style="display: flex; align-items: center; padding: 6px 10px; border-bottom: 1px solid rgba(148, 163, 184, 0.05); transition: background 0.2s ease; width: 100%;">
+                <div class="main-article-item" data-id="${article.id}" style="display: flex; align-items: center; padding: 10px 12px; border-bottom: 1px solid rgba(148, 163, 184, 0.05); transition: background 0.2s ease; width: 100%;">
                     <div class="main-article-checkbox" style="flex: 0.5; text-align: center; color: #94a3b8; font-size: 12px;">
                         <input type="checkbox" class="article-checkbox" value="${article.id}" onchange="updateSelectedCount()" style="margin: 0;">
                     </div>
                     <div class="main-article-index" style="flex: 1; text-align: center; color: #94a3b8; font-size: 12px;">${articleIndex}</div>
-                    <div class="main-article-title" onclick="viewArticle(${article.id})" style="flex: 1.5; cursor: pointer; color: #94a3b8; font-size: 12px; padding: 0 5px; text-align: left;">${escapeHtml(article.title)}</div>
+                    <div class="main-article-title" onclick="viewArticle(${article.id})" style="flex: 1.5; cursor: pointer; color: #e2e8f0; font-size: 14px; font-weight: 500; padding: 0 5px; text-align: left;">${escapeHtml(article.title)}</div>
                     <div class="main-article-category" style="flex: 1; color: #94a3b8; font-size: 12px; text-align: center;">${article.category || '未分类'}</div>
                     <div class="main-article-date" style="flex: 1; color: #94a3b8; font-size: 12px; text-align: center;">${formatDate(article.updated_at)}</div>
                     <div class="main-article-views-count" style="flex: 1; color: #94a3b8; font-size: 12px; text-align: center;">
                         <i class="fa fa-eye" style="font-size: 11px; margin-right: 2px;"></i> ${article.views || 0}
                     </div>
-                    <div class="main-article-actions" style="flex: 1; display: flex; gap: 4px; justify-content: center;">
-                        <button class="action-btn edit-btn" onclick="editArticle(${article.id})" title="编辑文章" style="
-                            padding: 2px 4px;
+                    <div class="main-article-actions" style="flex: 1; display: flex; gap: 6px; justify-content: center;">
+                        <button class="action-btn edit-btn" onclick="editArticle(${article.id})" title="编辑${articleTerm(article.category)}" style="
+                            padding: 6px 10px;
                             border: 1px solid rgba(148, 163, 184, 0.3);
                             background: rgba(30, 41, 59, 0.8);
                             color: #cbd5e1;
-                            border-radius: 2px;
+                            border-radius: 6px;
                             cursor: pointer;
-                            font-size: 11px;
-                        ">
-                            <i class="fa fa-pencil" style="font-size: 10px;"></i>
+                            font-size: 13px;
+                            transition: all 0.2s ease;
+                        "
+                        onmouseover="this.style.background='rgba(96,165,250,0.15)';this.style.borderColor='rgba(96,165,250,0.5)';this.style.color='#60a5fa';"
+                        onmouseout="this.style.background='rgba(30,41,59,0.8)';this.style.borderColor='rgba(148,163,184,0.3)';this.style.color='#cbd5e1';">
+                            <i class="fa fa-pencil" style="font-size: 14px;"></i>
                         </button>
-                        <button class="action-btn delete-btn" onclick="deleteArticle(${article.id})" title="删除文章" style="
-                            padding: 2px 4px;
+                        <button class="action-btn delete-btn" onclick="deleteArticle(${article.id})" title="删除${articleTerm(article.category)}" style="
+                            padding: 6px 10px;
                             border: 1px solid rgba(148, 163, 184, 0.3);
                             background: rgba(30, 41, 59, 0.8);
                             color: #cbd5e1;
-                            border-radius: 2px;
+                            border-radius: 6px;
                             cursor: pointer;
-                            font-size: 11px;
-                        ">
-                            <i class="fa fa-trash" style="font-size: 10px;"></i>
+                            font-size: 13px;
+                            transition: all 0.2s ease;
+                        "
+                        onmouseover="this.style.background='rgba(239,68,68,0.15)';this.style.borderColor='rgba(239,68,68,0.5)';this.style.color='#f87171';"
+                        onmouseout="this.style.background='rgba(30,41,59,0.8)';this.style.borderColor='rgba(148,163,184,0.3)';this.style.color='#cbd5e1';">
+                            <i class="fa fa-trash" style="font-size: 14px;"></i>
                         </button>
                     </div>
                 </div>
@@ -2339,18 +2469,8 @@
                     ${renderPagination()}
                 </div>
             `;
-            
-            // 添加鼠标悬停效果
-            document.querySelectorAll('.main-article-item').forEach(item => {
-                item.addEventListener('mouseenter', function() {
-                    this.style.background = 'rgba(96, 165, 250, 0.1)';
-                });
-                item.addEventListener('mouseleave', function() {
-                    this.style.background = 'transparent';
-                });
-            });
         }
-        
+
         function renderPagination() {
             const totalPages = Math.ceil(totalArticles / pageSize);
 
@@ -2366,16 +2486,16 @@
                 let startPage = Math.max(1, currentPage - Math.floor(showPages / 2));
                 let endPage = Math.min(totalPages, startPage + showPages - 1);
                 if (endPage - startPage < showPages - 1) startPage = Math.max(1, endPage - showPages + 1);
-                paginationHTML += `<button onclick=\"changePage(1)\" ${currentPage===1?'disabled':''} style=\"padding:6px 12px;border:1px solid rgba(148,163,184,0.2);background:rgba(30,41,59,0.8);color:#cbd5e1;border-radius:6px;cursor:pointer;font-size:12px;${currentPage===1?'opacity:0.5;cursor:not-allowed;':''}\">首页</button>`;
-                paginationHTML += `<button onclick=\"changePage(${currentPage - 1})\" ${currentPage===1?'disabled':''} style=\"padding:6px 12px;border:1px solid rgba(148,163,184,0.2);background:rgba(30,41,59,0.8);color:#cbd5e1;border-radius:6px;cursor:pointer;font-size:12px;${currentPage===1?'opacity:0.5;cursor:not-allowed;':''}\">上一页</button>`;
+                paginationHTML += `<button onclick="changePage(1)" class="page-btn" ${currentPage===1?'disabled':''}>首页</button>`;
+                paginationHTML += `<button onclick="changePage(${currentPage - 1})" class="page-btn" ${currentPage===1?'disabled':''}>上一页</button>`;
                 for (let i = startPage; i <= endPage; i++) {
-                    paginationHTML += `<button onclick=\"changePage(${i})\" style=\"padding:6px 12px;border:1px solid ${currentPage===i?'rgba(96,165,250,0.5)':'rgba(148,163,184,0.2)'};background:${currentPage===i?'rgba(96,165,250,0.15)':'rgba(30,41,59,0.8)'};color:${currentPage===i?'#60a5fa':'#cbd5e1'};border-radius:6px;cursor:pointer;font-size:12px;\">${i}</button>`;
+                    paginationHTML += `<button onclick="changePage(${i})" class="page-btn ${currentPage===i?'active':''}">${i}</button>`;
                 }
-                paginationHTML += `<button onclick=\"changePage(${currentPage + 1})\" ${currentPage===totalPages?'disabled':''} style=\"padding:6px 12px;border:1px solid rgba(148,163,184,0.2);background:rgba(30,41,59,0.8);color:#cbd5e1;border-radius:6px;cursor:pointer;font-size:12px;${currentPage===totalPages?'opacity:0.5;cursor:not-allowed;':''}\">下一页</button>`;
-                paginationHTML += `<button onclick=\"changePage(${totalPages})\" ${currentPage===totalPages?'disabled':''} style=\"padding:6px 12px;border:1px solid rgba(148,163,184,0.2);background:rgba(30,41,59,0.8);color:#cbd5e1;border-radius:6px;cursor:pointer;font-size:12px;${currentPage===totalPages?'opacity:0.5;cursor:not-allowed;':''}\">末页</button>`;
+                paginationHTML += `<button onclick="changePage(${currentPage + 1})" class="page-btn" ${currentPage===totalPages?'disabled':''}>下一页</button>`;
+                paginationHTML += `<button onclick="changePage(${totalPages})" class="page-btn" ${currentPage===totalPages?'disabled':''}>末页</button>`;
             }
 
-            paginationHTML += `<span style=\"color:#94a3b8;font-size:12px;margin-left:12px;\">共 ${totalArticles} 篇，第 ${currentPage}/${totalPages || 1} 页</span>`;
+            paginationHTML += `<span style="color:#94a3b8;font-size:12px;margin-left:12px;">共 ${totalArticles} 篇，第 ${currentPage}/${totalPages || 1} 页</span>`;
             return paginationHTML;
         }
 
@@ -2564,11 +2684,19 @@
                     viewArticle(result.article.id);
                 } else {
                     console.log('No article found');
-                    alert(direction === 'prev' ? '已经是第一篇文章了' : '已经是最后一篇文章了');
+                    alert(direction === 'prev' ? `已经是第一篇${articleTerm(currentCategory)}了` : `已经是最后一篇${articleTerm(currentCategory)}了`);
                 }
             } catch (error) {
                 console.error('导航失败:', error);
                 alert('导航失败');
+            }
+        }
+
+        // 仅在「工作日报」分类下显示顶部统计栏；showAll 传 true 强制隐藏（用于切到非文章模块）
+        function updateStatsBarVisibility(forceHide) {
+            const bar = document.getElementById('articlesStatsBar');
+            if (bar) {
+                bar.style.display = (forceHide || currentCategory !== '工作日报') ? 'none' : 'flex';
             }
         }
 
@@ -2584,31 +2712,34 @@
             if (toolbar) {
                 toolbar.style.display = 'flex';
             }
+            updateStatsBarVisibility();
             loadArticles();
         }
-        function filterByTag(tag) { 
-            currentTag = tag; 
-            currentCategory = null; 
-            currentPage = 1; 
-            currentView = 'all'; 
+        function filterByTag(tag) {
+            currentTag = tag;
+            currentCategory = null;
+            currentPage = 1;
+            currentView = 'all';
             // 显示文章工具栏
             const toolbar = document.querySelector('.toolbar');
             if (toolbar) {
                 toolbar.style.display = 'flex';
             }
-            loadArticles(); 
+            updateStatsBarVisibility();
+            loadArticles();
         }
-        function showAll() { 
-            currentCategory = null; 
-            currentTag = null; 
-            currentPage = 1; 
-            currentView = 'all'; 
+        function showAll() {
+            currentCategory = null;
+            currentTag = null;
+            currentPage = 1;
+            currentView = 'all';
             // 显示文章工具栏
             const toolbar = document.querySelector('.toolbar');
             if (toolbar) {
                 toolbar.style.display = 'flex';
             }
-            loadArticles(); 
+            updateStatsBarVisibility();
+            loadArticles();
         }
         function showFavorites() {
             currentCategory = null;
@@ -2620,6 +2751,7 @@
             if (toolbar) {
                 toolbar.style.display = 'flex';
             }
+            updateStatsBarVisibility();
             loadArticles();
         }
 
@@ -2789,10 +2921,11 @@
             if (toolbar) {
                 toolbar.style.display = 'none';
             }
+            updateStatsBarVisibility(true);
             document.getElementById('articleList').innerHTML = `
                 <div id="kiwiSalesSection" style="padding: 20px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                        <h2 style="color: #94a3b8; margin: 0; font-size: 14px; text-align: center; flex: 1; font-weight: 500;"><i class="fa fa-lemon-o" style="color: #7CFC00; margin-right: 8px;"></i> 猕猴桃销售订单</h2>
+                        <h2 style="color: #94a3b8; margin: 0; font-size: 18px; text-align: center; flex: 1; font-weight: 500;"><i class="fa fa-lemon-o" style="color: #7CFC00; margin-right: 8px;"></i> 猕猴桃销售订单</h2>
                         <div style="margin-left: 20px; display: flex; gap: 8px;">
                             <button class="btn btn-secondary" onclick="openKiwiSalesModal()" style="
                                 padding: 12px 24px;
@@ -2839,7 +2972,7 @@
                         </div>
                         <div style="display: flex; align-items: center; gap: 8px;">
                             <label style="font-size: 12px; color: #94a3b8;">客户名：</label>
-                            <input type="text" id="kiwiCustomerSearch" placeholder="搜索客户名..." style="
+                            <input type="text" id="kiwiCustomerSearch" style="
                                 width: 180px;
                                 padding: 8px 12px;
                                 border: 1px solid rgba(148, 163, 184, 0.2);
@@ -2851,7 +2984,7 @@
                         </div>
                         <div style="display: flex; align-items: center; gap: 8px;">
                             <label style="font-size: 12px; color: #94a3b8;">客户电话：</label>
-                            <input type="text" id="kiwiPhoneSearch" placeholder="搜索客户电话..." style="
+                            <input type="text" id="kiwiPhoneSearch" style="
                                 width: 180px;
                                 padding: 8px 12px;
                                 border: 1px solid rgba(148, 163, 184, 0.2);
@@ -2868,8 +3001,8 @@
                             <i class="fa fa-refresh"></i> 重置
                         </button>
                     </div>
-                    <div class="main-article-header" style="display: flex; align-items: center; padding: 6px 10px; background: rgba(15, 23, 42, 0.5); border-bottom: 1px solid rgba(148, 163, 184, 0.1); border-radius: 8px 8px 0 0; width: 100%;">
-                        <div style="flex: 0.5; text-align: center; font-weight: 500; color: #94a3b8; font-size: 12px;">
+                    <div class="main-article-header" style="display: flex; align-items: center; padding: 10px 12px; background: rgba(15, 23, 42, 0.8); border-bottom: 1px solid rgba(148, 163, 184, 0.15); border-radius: 8px 8px 0 0; width: 100%;">
+                        <div style="flex: 0.5; text-align: center; font-weight: 600; color: #cbd5e1; font-size: 13px;">
                             <input type="checkbox" id="selectAllKiwiSales" onchange="toggleSelectAllKiwiSales(this)" style="
                                 width: 14px;
                                 height: 14px;
@@ -2877,17 +3010,17 @@
                                 cursor: pointer;
                             ">
                         </div>
-                        <div class="main-header-index" style="flex: 0.8; text-align: center; font-weight: 500; color: #94a3b8; font-size: 11px;">序号</div>
-                        <div class="main-header-customer" style="flex: 1.2; font-weight: 500; color: #94a3b8; font-size: 11px; text-align: left; padding: 0 5px;">客户名</div>
-                        <div class="main-header-phone" style="flex: 1.2; font-weight: 500; color: #94a3b8; font-size: 11px; text-align: left; padding: 0 5px;">电话</div>
-                        <div class="main-header-address" style="flex: 2; font-weight: 500; color: #94a3b8; font-size: 11px; text-align: left; padding: 0 5px;">地址</div>
-                        <div class="main-header-order-date" style="flex: 1; font-weight: 500; color: #94a3b8; font-size: 11px; text-align: center;">接单日期</div>
-                        <div class="main-header-status" style="flex: 1; font-weight: 500; color: #94a3b8; font-size: 11px; text-align: center;">状态</div>
-                        <div class="main-header-tracking" style="flex: 1.5; font-weight: 500; color: #94a3b8; font-size: 11px; text-align: left; padding: 0 5px; white-space: nowrap;">运单号</div>
-                        <div class="main-header-remark" style="flex: 0.8; font-weight: 500; color: #94a3b8; font-size: 11px; text-align: center;">备注</div>
-                        <div class="main-header-quantity" style="flex: 0.6; font-weight: 500; color: #94a3b8; font-size: 11px; text-align: center;">数量</div>
-                        <div class="main-header-payment" style="flex: 0.8; font-weight: 500; color: #94a3b8; font-size: 11px; text-align: center;">支付金额</div>
-                        <div class="main-header-actions" style="flex: 0.8; font-weight: 500; color: #94a3b8; font-size: 12px; text-align: center;">操作</div>
+                        <div class="main-header-index" style="flex: 0.8; text-align: center; font-weight: 600; color: #cbd5e1; font-size: 13px;">序号</div>
+                        <div class="main-header-customer" style="flex: 1.2; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: left; padding: 0 5px;">客户名</div>
+                        <div class="main-header-phone" style="flex: 1.2; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: left; padding: 0 5px;">电话</div>
+                        <div class="main-header-address" style="flex: 2; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: left; padding: 0 5px;">地址</div>
+                        <div class="main-header-order-date" style="flex: 1; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">接单日期</div>
+                        <div class="main-header-status" style="flex: 1; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">状态</div>
+                        <div class="main-header-tracking" style="flex: 1.5; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: left; padding: 0 5px; white-space: nowrap;">运单号</div>
+                        <div class="main-header-remark" style="flex: 0.8; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">备注</div>
+                        <div class="main-header-quantity" style="flex: 0.6; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">数量</div>
+                        <div class="main-header-payment" style="flex: 0.8; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">支付金额</div>
+                        <div class="main-header-actions" style="flex: 0.8; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">操作</div>
                     </div>
                     <div id="kiwiSalesTableBody"></div>
                     <div class="pagination" id="kiwiSalesPagination" style="
@@ -2921,11 +3054,11 @@
             const tbody = document.getElementById('kiwiSalesTableBody');
             if (!tbody) return;
             if (kiwiSalesData.length === 0) {
-                tbody.innerHTML = '<div style="padding: 40px; text-align: center; color: #64748b; font-size: 12px;">暂无订单数据</div>';
+                tbody.innerHTML = '<div class="empty-state-card"><i class="fa fa-inbox"></i><p>暂无订单数据</p></div>';
                 return;
             }
             tbody.innerHTML = kiwiSalesData.map((sale, index) => `
-                <div class="main-article-item" data-id="${sale.id}" style="display: flex; align-items: center; padding: 6px 10px; border-bottom: 1px solid rgba(148, 163, 184, 0.05); transition: background 0.2s ease; width: 100%;">
+                <div class="main-article-item" data-id="${sale.id}" style="display: flex; align-items: center; padding: 10px 12px; border-bottom: 1px solid rgba(148, 163, 184, 0.05); width: 100%;">
                     <div style="flex: 0.5; text-align: center;">
                         <input type="checkbox" class="kiwi-sales-checkbox" value="${sale.id}" onchange="updateKiwiSalesDeleteButton()" style="
                             width: 14px;
@@ -2934,55 +3067,24 @@
                             cursor: pointer;
                         ">
                     </div>
-                    <div class="main-article-index" style="flex: 0.8; text-align: center; color: #94a3b8; font-size: 11px;">${index + 1}</div>
-                    <div class="main-article-customer" style="flex: 1.2; color: #94a3b8; font-size: 11px; text-align: left; padding: 0 5px;">${escapeHtml(sale.customer_name)}</div>
-                    <div class="main-article-phone" style="flex: 1.2; color: #94a3b8; font-size: 11px; text-align: left; padding: 0 5px;">${escapeHtml(sale.phone)}</div>
-                    <div class="main-article-address" style="flex: 2; color: #94a3b8; font-size: 11px; text-align: left; padding: 0 5px; word-break: break-word;">${escapeHtml(sale.address)}</div>
-                    <div class="main-article-order-date" style="flex: 1; color: #94a3b8; font-size: 11px; text-align: center; white-space: nowrap;">${sale.order_date}</div>
-                    <div class="main-article-status" style="flex: 1; color: #94a3b8; font-size: 11px; text-align: center;">${sale.status || '未发货'}</div>
-                    <div class="main-article-tracking" style="flex: 1.5; color: #94a3b8; font-size: 11px; text-align: left; padding: 0 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${sale.tracking_number || '-'}</div>
-                    <div class="main-article-remark" style="flex: 0.8; color: #94a3b8; font-size: 11px; text-align: center;">${sale.remark || '-'}</div>
-                    <div class="main-article-quantity" style="flex: 0.6; color: #94a3b8; font-size: 11px; text-align: center;">${sale.quantity || 0}</div>
-                    <div class="main-article-payment" style="flex: 0.8; color: #94a3b8; font-size: 11px; text-align: center;">${(sale.payment_amount || 0).toFixed(2)}</div>
-                    <div class="main-article-actions" style="flex: 0.8; display: flex; gap: 4px; justify-content: center;">
-                        <button class="action-btn edit-btn" onclick="editKiwiSale(${sale.id})" title="编辑订单" style="
-                            padding: 3px 6px;
-                            border: 1px solid rgba(148, 163, 184, 0.3);
-                            background: rgba(30, 41, 59, 0.8);
-                            color: #cbd5e1;
-                            border-radius: 4px;
-                            cursor: pointer;
-                            font-size: 10px;
-                            margin-right: 4px;
-                        ">
-                            <i class="fa fa-pencil" style="font-size: 9px;"></i>
-                        </button>
-                        <button class="action-btn delete-btn" onclick="deleteKiwiSale(${sale.id})" title="删除订单" style="
-                            padding: 3px 6px;
-                            border: 1px solid rgba(148, 163, 184, 0.3);
-                            background: rgba(30, 41, 59, 0.8);
-                            color: #cbd5e1;
-                            border-radius: 4px;
-                            cursor: pointer;
-                            font-size: 10px;
-                        ">
-                            <i class="fa fa-trash" style="font-size: 9px;"></i>
-                        </button>
+                    <div class="main-article-index" style="flex: 0.8; text-align: center; color: #94a3b8; font-size: 12px;">${index + 1}</div>
+                    <div class="main-article-customer" style="flex: 1.2; color: #e2e8f0; font-size: 13px; text-align: left; padding: 0 5px;">${escapeHtml(sale.customer_name)}</div>
+                    <div class="main-article-phone" style="flex: 1.2; color: #94a3b8; font-size: 12px; text-align: left; padding: 0 5px;">${escapeHtml(sale.phone)}</div>
+                    <div class="main-article-address" style="flex: 2; color: #94a3b8; font-size: 12px; text-align: left; padding: 0 5px; word-break: break-word;">${escapeHtml(sale.address)}</div>
+                    <div class="main-article-order-date" style="flex: 1; color: #94a3b8; font-size: 12px; text-align: center; white-space: nowrap;">${sale.order_date}</div>
+                    <div class="main-article-status" style="flex: 1; text-align: center;"><span class="status-pill ${(sale.status === '已发货') ? 'shipped' : 'unshipped'}">${sale.status || '未发货'}</span></div>
+                    <div class="main-article-tracking" style="flex: 1.5; color: #94a3b8; font-size: 12px; text-align: left; padding: 0 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${sale.tracking_number || '-'}</div>
+                    <div class="main-article-remark" style="flex: 0.8; color: #94a3b8; font-size: 12px; text-align: center;">${sale.remark || '-'}</div>
+                    <div class="main-article-quantity" style="flex: 0.6; color: #94a3b8; font-size: 12px; text-align: center;">${sale.quantity || 0}</div>
+                    <div class="main-article-payment" style="flex: 0.8; color: #2dd4bf; font-size: 12px; font-weight: 600; text-align: center;">${(sale.payment_amount || 0).toFixed(2)}</div>
+                    <div class="main-article-actions" style="flex: 0.8; display: flex; gap: 6px; justify-content: center;">
+                        <button class="action-icon-btn edit" onclick="editKiwiSale(${sale.id})" title="编辑订单"><i class="fa fa-pencil"></i></button>
+                        <button class="action-icon-btn delete" onclick="deleteKiwiSale(${sale.id})" title="删除订单"><i class="fa fa-trash"></i></button>
                     </div>
                 </div>
             `).join('');
-            
-            // 添加鼠标悬停效果
-            document.querySelectorAll('.main-article-item').forEach(item => {
-                item.addEventListener('mouseenter', function() {
-                    this.style.background = 'rgba(96, 165, 250, 0.1)';
-                });
-                item.addEventListener('mouseleave', function() {
-                    this.style.background = 'transparent';
-                });
-            });
         }
-        
+
         function renderKiwiSalesPagination() {
             const pagination = document.getElementById('kiwiSalesPagination');
             if (!pagination) return;
@@ -2997,13 +3099,13 @@
                 let startPage = Math.max(1, kiwiSalesCurrentPage - Math.floor(showPages / 2));
                 let endPage = Math.min(totalPages, startPage + showPages - 1);
                 if (endPage - startPage < showPages - 1) startPage = Math.max(1, endPage - showPages + 1);
-                paginationHTML += `<button onclick="changeKiwiSalesPage(1)" ${kiwiSalesCurrentPage===1?'disabled':''} style="padding:6px 12px;border:1px solid rgba(148,163,184,0.2);background:rgba(30,41,59,0.8);color:#cbd5e1;border-radius:6px;cursor:pointer;font-size:12px;${kiwiSalesCurrentPage===1?'opacity:0.5;cursor:not-allowed;':''}">首页</button>`;
-                paginationHTML += `<button onclick="changeKiwiSalesPage(${kiwiSalesCurrentPage - 1})" ${kiwiSalesCurrentPage===1?'disabled':''} style="padding:6px 12px;border:1px solid rgba(148,163,184,0.2);background:rgba(30,41,59,0.8);color:#cbd5e1;border-radius:6px;cursor:pointer;font-size:12px;${kiwiSalesCurrentPage===1?'opacity:0.5;cursor:not-allowed;':''}">上一页</button>`;
+                paginationHTML += `<button onclick="changeKiwiSalesPage(1)" class="page-btn" ${kiwiSalesCurrentPage===1?'disabled':''}>首页</button>`;
+                paginationHTML += `<button onclick="changeKiwiSalesPage(${kiwiSalesCurrentPage - 1})" class="page-btn" ${kiwiSalesCurrentPage===1?'disabled':''}>上一页</button>`;
                 for (let i = startPage; i <= endPage; i++) {
-                    paginationHTML += `<button onclick="changeKiwiSalesPage(${i})" style="padding:6px 12px;border:1px solid ${kiwiSalesCurrentPage===i?'rgba(96,165,250,0.5)':'rgba(148,163,184,0.2)'};background:${kiwiSalesCurrentPage===i?'rgba(96,165,250,0.15)':'rgba(30,41,59,0.8)'};color:${kiwiSalesCurrentPage===i?'#60a5fa':'#cbd5e1'};border-radius:6px;cursor:pointer;font-size:12px;">${i}</button>`;
+                    paginationHTML += `<button onclick="changeKiwiSalesPage(${i})" class="page-btn ${kiwiSalesCurrentPage===i?'active':''}">${i}</button>`;
                 }
-                paginationHTML += `<button onclick="changeKiwiSalesPage(${kiwiSalesCurrentPage + 1})" ${kiwiSalesCurrentPage===totalPages?'disabled':''} style="padding:6px 12px;border:1px solid rgba(148,163,184,0.2);background:rgba(30,41,59,0.8);color:#cbd5e1;border-radius:6px;cursor:pointer;font-size:12px;${kiwiSalesCurrentPage===totalPages?'opacity:0.5;cursor:not-allowed;':''}">下一页</button>`;
-                paginationHTML += `<button onclick="changeKiwiSalesPage(${totalPages})" ${kiwiSalesCurrentPage===totalPages?'disabled':''} style="padding:6px 12px;border:1px solid rgba(148,163,184,0.2);background:rgba(30,41,59,0.8);color:#cbd5e1;border-radius:6px;cursor:pointer;font-size:12px;${kiwiSalesCurrentPage===totalPages?'opacity:0.5;cursor:not-allowed;':''}">末页</button>`;
+                paginationHTML += `<button onclick="changeKiwiSalesPage(${kiwiSalesCurrentPage + 1})" class="page-btn" ${kiwiSalesCurrentPage===totalPages?'disabled':''}>下一页</button>`;
+                paginationHTML += `<button onclick="changeKiwiSalesPage(${totalPages})" class="page-btn" ${kiwiSalesCurrentPage===totalPages?'disabled':''}>末页</button>`;
             }
             paginationHTML += `<span style="color:#94a3b8;font-size:12px;margin-left:12px;">共 ${kiwiSalesTotal} 条，第 ${kiwiSalesCurrentPage}/${totalPages || 1} 页</span>`;
             pagination.innerHTML = paginationHTML;
@@ -3029,6 +3131,7 @@
             if (toolbar) {
                 toolbar.style.display = 'none';
             }
+            updateStatsBarVisibility(true);
             const currentYear = new Date().getFullYear();
             let yearOptions = '';
             for (let y = currentYear + 1; y >= 2024; y--) {
@@ -3043,7 +3146,7 @@
                                 ${yearOptions}
                             </select>
                         </div>
-                        <h2 style="color: #94a3b8; margin: 0; font-size: 14px; text-align: center; flex: 1; font-weight: 500;"><i class="fa fa-lemon-o" style="color: #7CFC00; margin-right: 8px;"></i> 销售报表统计</h2>
+                        <h2 style="color: #94a3b8; margin: 0; font-size: 18px; text-align: center; flex: 1; font-weight: 500;"><i class="fa fa-lemon-o" style="color: #7CFC00; margin-right: 8px;"></i> 销售报表统计</h2>
                         <div style="width:120px;"></div>
                     </div>
                     <div id="kiwiReportStats" style="margin-bottom:20px;"></div>
@@ -3098,8 +3201,8 @@
                         <div style="font-size:24px;font-weight:700;color:#22c55e;">${summary.total_quantity || 0}</div>
                         <div style="font-size:12px;color:#94a3b8;margin-top:4px;">总数量</div>
                     </div>
-                    <div style="flex:1;min-width:140px;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.2);border-radius:10px;padding:16px;text-align:center;">
-                        <div style="font-size:24px;font-weight:700;color:#f59e0b;">¥${(summary.total_amount || 0).toFixed(2)}</div>
+                    <div style="flex:1;min-width:140px;background:rgba(45,212,191,0.1);border:1px solid rgba(45,212,191,0.2);border-radius:10px;padding:16px;text-align:center;">
+                        <div style="font-size:24px;font-weight:700;color:#2dd4bf;">¥${(summary.total_amount || 0).toFixed(2)}</div>
                         <div style="font-size:12px;color:#94a3b8;margin-top:4px;">总金额</div>
                     </div>
                 </div>
@@ -3483,20 +3586,20 @@
             const tbody = document.getElementById('expenseTableBody');
             if (!tbody) return;
             if (expenseData.length === 0) {
-                tbody.innerHTML = '<div style="text-align:center;color:#64748b;padding:40px;font-size:14px;">暂无消费记录</div>';
+                tbody.innerHTML = '<div class="empty-state-card"><i class="fa fa-inbox"></i><p>暂无消费记录</p></div>';
                 return;
             }
             tbody.innerHTML = expenseData.map((r, i) => `
-                <div style="display:grid;grid-template-columns:40px 50px 100px 80px 100px 1fr 100px;align-items:center;padding:12px 16px;border-bottom:1px solid rgba(148,163,184,0.1);font-size:13px;transition:background 0.2s;" onmouseover="this.style.background='rgba(148,163,184,0.05)'" onmouseout="this.style.background='transparent'">
+                <div class="data-row" style="display:grid;grid-template-columns:40px 50px 100px 80px 100px 1fr 100px;align-items:center;padding:12px 16px;border-bottom:1px solid rgba(148,163,184,0.1);font-size:13px;">
                     <div style="display:flex;align-items:center;justify-content:center;"><input type="checkbox" class="expense-checkbox" data-id="${r.id}" onchange="toggleExpenseSelect(${r.id})" ${selectedExpenseIds.has(r.id)?'checked':''} style="cursor:pointer;"></div>
                     <div style="color:#94a3b8;">${(expenseCurrentPage - 1) * expensePageSize + i + 1}</div>
                     <div><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:${EXPENSE_COLORS[r.category] || '#64748b'}22;color:${EXPENSE_COLORS[r.category] || '#64748b'};">${r.category}</span></div>
-                    <div style="color:#22c55e;font-weight:600;">¥${parseFloat(r.amount).toFixed(2)}</div>
+                    <div style="color:#2dd4bf;font-weight:600;">¥${parseFloat(r.amount).toFixed(2)}</div>
                     <div style="color:#94a3b8;">${r.date}</div>
                     <div style="color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${r.remark || ''}">${r.remark || '-'}</div>
                     <div style="display:flex;gap:6px;justify-content:flex-end;">
-                        <button onclick="editExpense(${r.id})" style="padding:4px 10px;border:1px solid rgba(148,163,184,0.2);background:rgba(96,165,250,0.1);color:#60a5fa;border-radius:4px;cursor:pointer;font-size:11px;">编辑</button>
-                        <button onclick="deleteExpense(${r.id})" style="padding:4px 10px;border:1px solid rgba(239,68,68,0.2);background:rgba(239,68,68,0.1);color:#f87171;border-radius:4px;cursor:pointer;font-size:11px;">删除</button>
+                        <button onclick="editExpense(${r.id})" class="action-icon-btn edit" title="编辑"><i class="fa fa-pencil"></i></button>
+                        <button onclick="deleteExpense(${r.id})" class="action-icon-btn delete" title="删除"><i class="fa fa-trash"></i></button>
                     </div>
                 </div>
             `).join('');
@@ -3514,13 +3617,13 @@
                 let startPage = Math.max(1, expenseCurrentPage - Math.floor(showPages / 2));
                 let endPage = Math.min(totalPages, startPage + showPages - 1);
                 if (endPage - startPage < showPages - 1) startPage = Math.max(1, endPage - showPages + 1);
-                html += `<button onclick="changeExpensePage(1)" ${expenseCurrentPage===1?'disabled':''} style="padding:6px 12px;border:1px solid rgba(148,163,184,0.2);background:rgba(30,41,59,0.8);color:#cbd5e1;border-radius:6px;cursor:pointer;font-size:12px;${expenseCurrentPage===1?'opacity:0.5;cursor:not-allowed;':''}">首页</button>`;
-                html += `<button onclick="changeExpensePage(${expenseCurrentPage-1})" ${expenseCurrentPage===1?'disabled':''} style="padding:6px 12px;border:1px solid rgba(148,163,184,0.2);background:rgba(30,41,59,0.8);color:#cbd5e1;border-radius:6px;cursor:pointer;font-size:12px;${expenseCurrentPage===1?'opacity:0.5;cursor:not-allowed;':''}">上一页</button>`;
+                html += `<button onclick="changeExpensePage(1)" class="page-btn" ${expenseCurrentPage===1?'disabled':''}>首页</button>`;
+                html += `<button onclick="changeExpensePage(${expenseCurrentPage-1})" class="page-btn" ${expenseCurrentPage===1?'disabled':''}>上一页</button>`;
                 for (let i = startPage; i <= endPage; i++) {
-                    html += `<button onclick="changeExpensePage(${i})" style="padding:6px 12px;border:1px solid ${expenseCurrentPage===i?'rgba(96,165,250,0.5)':'rgba(148,163,184,0.2)'};background:${expenseCurrentPage===i?'rgba(96,165,250,0.15)':'rgba(30,41,59,0.8)'};color:${expenseCurrentPage===i?'#60a5fa':'#cbd5e1'};border-radius:6px;cursor:pointer;font-size:12px;">${i}</button>`;
+                    html += `<button onclick="changeExpensePage(${i})" class="page-btn ${expenseCurrentPage===i?'active':''}">${i}</button>`;
                 }
-                html += `<button onclick="changeExpensePage(${expenseCurrentPage+1})" ${expenseCurrentPage===totalPages?'disabled':''} style="padding:6px 12px;border:1px solid rgba(148,163,184,0.2);background:rgba(30,41,59,0.8);color:#cbd5e1;border-radius:6px;cursor:pointer;font-size:12px;${expenseCurrentPage===totalPages?'opacity:0.5;cursor:not-allowed;':''}">下一页</button>`;
-                html += `<button onclick="changeExpensePage(${totalPages})" ${expenseCurrentPage===totalPages?'disabled':''} style="padding:6px 12px;border:1px solid rgba(148,163,184,0.2);background:rgba(30,41,59,0.8);color:#cbd5e1;border-radius:6px;cursor:pointer;font-size:12px;${expenseCurrentPage===totalPages?'opacity:0.5;cursor:not-allowed;':''}">末页</button>`;
+                html += `<button onclick="changeExpensePage(${expenseCurrentPage+1})" class="page-btn" ${expenseCurrentPage===totalPages?'disabled':''}>下一页</button>`;
+                html += `<button onclick="changeExpensePage(${totalPages})" class="page-btn" ${expenseCurrentPage===totalPages?'disabled':''}>末页</button>`;
             }
             html += `<span style="color:#94a3b8;font-size:12px;margin-left:12px;">共 ${expenseTotal} 条，第 ${expenseCurrentPage}/${totalPages || 1} 页</span>`;
             el.innerHTML = html;
@@ -3547,12 +3650,13 @@
             selectedExpenseIds.clear();
             const toolbar = document.querySelector('.toolbar');
             if (toolbar) toolbar.style.display = 'none';
+            updateStatsBarVisibility(true);
             const now = new Date();
             const defaultMonth = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
             document.getElementById('articleList').innerHTML = `
                 <div id="expenseSection" style="padding: 20px;">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-                        <h2 style="color:#94a3b8;margin:0;font-size:14px;text-align:center;flex:1;font-weight:500;"><i class="fa fa-money" style="color:#14b8a6;margin-right:8px;"></i> 消费记录</h2>
+                        <h2 style="color:#94a3b8;margin:0;font-size:18px;text-align:center;flex:1;font-weight:500;"><i class="fa fa-money" style="color:#14b8a6;margin-right:8px;"></i> 消费记录</h2>
                         <div style="margin-left:20px;display:flex;gap:8px;">
                             <button class="btn btn-secondary" onclick="openExpenseModal()" style="padding:12px 24px;border:1px solid rgba(148,163,184,0.1);background:rgba(255,255,255,0.05);color:#cbd5e1;border-radius:12px;cursor:pointer;font-size:14px;font-weight:600;transition:all 0.3s ease;">+ 新增记录</button>
                         </div>
@@ -3816,6 +3920,7 @@
             window.scrollTo(0, 0);
             const toolbar = document.querySelector('.toolbar');
             if (toolbar) toolbar.style.display = 'none';
+            updateStatsBarVisibility(true);
             const now = new Date();
             const currentYear = now.getFullYear();
             const currentMonth = now.getMonth() + 1;
@@ -3837,7 +3942,7 @@
             document.getElementById('articleList').innerHTML = `
                 <div id="expenseStatsSection" style="padding: 20px;">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-                        <h2 style="color:#94a3b8;margin:0;font-size:14px;text-align:center;flex:1;font-weight:500;"><i class="fa fa-bar-chart" style="color:#14b8a6;margin-right:8px;"></i> 消费统计</h2>
+                        <h2 style="color:#94a3b8;margin:0;font-size:18px;text-align:center;flex:1;font-weight:500;"><i class="fa fa-bar-chart" style="color:#14b8a6;margin-right:8px;"></i> 消费统计</h2>
                     </div>
                     <div style="display:flex;align-items:center;margin-bottom:20px;gap:10px;flex-wrap:wrap;">
                         <div style="display:flex;align-items:center;gap:8px;">
@@ -4092,22 +4197,22 @@
             const tbody = document.getElementById('overtimeTableBody');
             if (!tbody) return;
             if (overtimeData.length === 0) {
-                tbody.innerHTML = '<div style="text-align:center;color:#64748b;padding:40px;font-size:14px;">暂无加班记录</div>';
+                tbody.innerHTML = '<div class="empty-state-card"><i class="fa fa-inbox"></i><p>暂无加班记录</p></div>';
                 return;
             }
             tbody.innerHTML = overtimeData.map((r, i) => `
-                <div style="display:grid;grid-template-columns:40px 60px 90px 120px 100px 100px 80px 1fr 100px;align-items:center;padding:12px 16px;border-bottom:1px solid rgba(148,163,184,0.1);font-size:13px;transition:background 0.2s;" onmouseover="this.style.background='rgba(148,163,184,0.05)'" onmouseout="this.style.background='transparent'">
+                <div class="data-row" style="display:grid;grid-template-columns:40px 60px 90px 120px 100px 100px 80px 1fr 100px;align-items:center;padding:12px 16px;border-bottom:1px solid rgba(148,163,184,0.1);font-size:13px;">
                     <div style="display:flex;align-items:center;justify-content:center;"><input type="checkbox" class="overtime-checkbox" data-id="${r.id}" onchange="toggleOvertimeSelect(${r.id})" ${selectedOvertimeIds.has(r.id)?'checked':''} style="cursor:pointer;"></div>
                     <div style="color:#94a3b8;">${(overtimeCurrentPage - 1) * overtimePageSize + i + 1}</div>
                     <div>${r.date}</div>
                     <div><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;${r.overtime_type === 'weekday' ? 'background:rgba(244,114,182,0.15);color:#f472b6;' : 'background:rgba(59,130,246,0.15);color:#3b82f6;'}">${r.overtime_type === 'weekday' ? '平时加班' : '周末加班'}</span></div>
                     <div style="color:#cbd5e1;">${r.start_time}</div>
                     <div style="color:#cbd5e1;">${r.end_time}</div>
-                    <div style="color:#22c55e;font-weight:600;">${parseFloat(r.duration).toFixed(1)}h</div>
+                    <div style="color:#60a5fa;font-weight:600;">${parseFloat(r.duration).toFixed(1)}h</div>
                     <div style="color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${r.remark || ''}">${r.remark || '-'}</div>
                     <div style="display:flex;gap:6px;justify-content:flex-end;">
-                        <button onclick="editOvertimeRecord(${r.id})" style="padding:4px 10px;border:1px solid rgba(148,163,184,0.2);background:rgba(96,165,250,0.1);color:#60a5fa;border-radius:4px;cursor:pointer;font-size:11px;">编辑</button>
-                        <button onclick="deleteOvertimeRecord(${r.id})" style="padding:4px 10px;border:1px solid rgba(239,68,68,0.2);background:rgba(239,68,68,0.1);color:#f87171;border-radius:4px;cursor:pointer;font-size:11px;">删除</button>
+                        <button onclick="editOvertimeRecord(${r.id})" class="action-icon-btn edit" title="编辑"><i class="fa fa-pencil"></i></button>
+                        <button onclick="deleteOvertimeRecord(${r.id})" class="action-icon-btn delete" title="删除"><i class="fa fa-trash"></i></button>
                     </div>
                 </div>
             `).join('');
@@ -4127,13 +4232,13 @@
                 let startPage = Math.max(1, overtimeCurrentPage - Math.floor(showPages / 2));
                 let endPage = Math.min(totalPages, startPage + showPages - 1);
                 if (endPage - startPage < showPages - 1) startPage = Math.max(1, endPage - showPages + 1);
-                html += `<button onclick="changeOvertimePage(1)" ${overtimeCurrentPage===1?'disabled':''} style="padding:6px 12px;border:1px solid rgba(148,163,184,0.2);background:rgba(30,41,59,0.8);color:#cbd5e1;border-radius:6px;cursor:pointer;font-size:12px;${overtimeCurrentPage===1?'opacity:0.5;cursor:not-allowed;':''}">首页</button>`;
-                html += `<button onclick="changeOvertimePage(${overtimeCurrentPage-1})" ${overtimeCurrentPage===1?'disabled':''} style="padding:6px 12px;border:1px solid rgba(148,163,184,0.2);background:rgba(30,41,59,0.8);color:#cbd5e1;border-radius:6px;cursor:pointer;font-size:12px;${overtimeCurrentPage===1?'opacity:0.5;cursor:not-allowed;':''}">上一页</button>`;
+                html += `<button onclick="changeOvertimePage(1)" class="page-btn" ${overtimeCurrentPage===1?'disabled':''}>首页</button>`;
+                html += `<button onclick="changeOvertimePage(${overtimeCurrentPage-1})" class="page-btn" ${overtimeCurrentPage===1?'disabled':''}>上一页</button>`;
                 for (let i = startPage; i <= endPage; i++) {
-                    html += `<button onclick="changeOvertimePage(${i})" style="padding:6px 12px;border:1px solid ${overtimeCurrentPage===i?'rgba(96,165,250,0.5)':'rgba(148,163,184,0.2)'};background:${overtimeCurrentPage===i?'rgba(96,165,250,0.15)':'rgba(30,41,59,0.8)'};color:${overtimeCurrentPage===i?'#60a5fa':'#cbd5e1'};border-radius:6px;cursor:pointer;font-size:12px;">${i}</button>`;
+                    html += `<button onclick="changeOvertimePage(${i})" class="page-btn ${overtimeCurrentPage===i?'active':''}">${i}</button>`;
                 }
-                html += `<button onclick="changeOvertimePage(${overtimeCurrentPage+1})" ${overtimeCurrentPage===totalPages?'disabled':''} style="padding:6px 12px;border:1px solid rgba(148,163,184,0.2);background:rgba(30,41,59,0.8);color:#cbd5e1;border-radius:6px;cursor:pointer;font-size:12px;${overtimeCurrentPage===totalPages?'opacity:0.5;cursor:not-allowed;':''}">下一页</button>`;
-                html += `<button onclick="changeOvertimePage(${totalPages})" ${overtimeCurrentPage===totalPages?'disabled':''} style="padding:6px 12px;border:1px solid rgba(148,163,184,0.2);background:rgba(30,41,59,0.8);color:#cbd5e1;border-radius:6px;cursor:pointer;font-size:12px;${overtimeCurrentPage===totalPages?'opacity:0.5;cursor:not-allowed;':''}">末页</button>`;
+                html += `<button onclick="changeOvertimePage(${overtimeCurrentPage+1})" class="page-btn" ${overtimeCurrentPage===totalPages?'disabled':''}>下一页</button>`;
+                html += `<button onclick="changeOvertimePage(${totalPages})" class="page-btn" ${overtimeCurrentPage===totalPages?'disabled':''}>末页</button>`;
             }
             html += `<span style="color:#94a3b8;font-size:12px;margin-left:12px;">共 ${overtimeTotal} 条，第 ${overtimeCurrentPage}/${totalPages || 1} 页</span>`;
             el.innerHTML = html;
@@ -4205,12 +4310,13 @@
             selectedOvertimeIds.clear();
             const toolbar = document.querySelector('.toolbar');
             if (toolbar) toolbar.style.display = 'none';
+            updateStatsBarVisibility(true);
             const now = new Date();
             const defaultMonth = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
             document.getElementById('articleList').innerHTML = `
                 <div id="overtimeSection" style="padding: 20px;">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-                        <h2 style="color:#94a3b8;margin:0;font-size:14px;text-align:center;flex:1;font-weight:500;"><i class="fa fa-clock-o" style="color:#f472b6;margin-right:8px;"></i> 加班记录管理</h2>
+                        <h2 style="color:#94a3b8;margin:0;font-size:18px;text-align:center;flex:1;font-weight:500;"><i class="fa fa-clock-o" style="color:#f472b6;margin-right:8px;"></i> 加班记录管理</h2>
                         <div style="margin-left:20px;display:flex;gap:8px;">
                             <button class="btn btn-secondary" onclick="openOvertimeModal()" style="padding:12px 24px;border:1px solid rgba(148,163,184,0.1);background:rgba(255,255,255,0.05);color:#cbd5e1;border-radius:12px;cursor:pointer;font-size:14px;font-weight:600;transition:all 0.3s ease;">+ 新增记录</button>
                         </div>
@@ -4505,10 +4611,12 @@
             editingId = id;
             document.getElementById('articleModal').classList.add('active');
             if (id) {
-                document.getElementById('modalTitle').textContent = '编辑文章';
+                // 先显示通用占位，等异步加载到真实分类后再由 loadArticleForEdit 覆盖，避免标题短暂闪烁成错误文案
+                document.getElementById('modalTitle').textContent = '编辑中...';
                 loadArticleForEdit(id);
             } else {
-                document.getElementById('modalTitle').textContent = '新增文章';
+                document.getElementById('modalTitle').textContent = '新增' + articleTerm(currentCategory);
+                document.getElementById('articleTitle').placeholder = '输入' + articleTerm(currentCategory) + '标题';
                 document.getElementById('articleForm').reset();
                 document.getElementById('articleId').value = '';
                 setTimeout(() => {
@@ -4786,6 +4894,8 @@
                 const article = await response.json();
                 document.getElementById('articleId').value = article.id;
                 document.getElementById('articleTitle').value = article.title;
+                document.getElementById('articleTitle').placeholder = '输入' + articleTerm(article.category) + '标题';
+                document.getElementById('modalTitle').textContent = '编辑' + articleTerm(article.category);
                 document.getElementById('articleCategory').value = article.category;
                 document.getElementById('articleTags').value = article.tags || '';
                 document.getElementById('articleContent').value = article.content;
@@ -5045,7 +5155,7 @@
                 }, 100);
             } catch (error) {
                 console.error('加载文章失败:', error);
-                alert('加载文章失败，请稍后重试');
+                alert('加载' + articleTerm(currentCategory) + '失败，请稍后重试');
             }
         }
 
@@ -5097,7 +5207,7 @@
                 
                 // 检查标题是否为空
                 if (!article.title) {
-                    alert('请输入文章标题');
+                    alert('请输入' + articleTerm(article.category) + '标题');
                     return;
                 }
                 
@@ -5129,7 +5239,7 @@
                 loadStats();
                 
                 // 添加成功提示
-                alert(id ? '文章更新成功！' : '文章保存成功！');
+                alert(id ? articleTerm(article.category) + '更新成功！' : articleTerm(article.category) + '保存成功！');
             } catch (error) {
                 console.error('保存文章失败:', error);
                 alert('保存失败，请稍后重试');
@@ -5217,29 +5327,31 @@
 
         async function deleteArticle(id, event) {
             if (event) event.stopPropagation();
-            if (!confirm('确定要删除这篇文章吗？')) return;
+            const cached = renderedArticlesCache.find(a => String(a.id) === String(id));
+            const category = cached ? cached.category : currentCategory;
+            if (!confirm('确定要删除这篇' + articleTerm(category) + '吗？')) return;
             try {
                 const response = await fetch(`${API_URL}/articles/${id}`, {
                     method: 'DELETE',
                     headers: getAuthHeaders()
                 });
-                
+
                 if (!response.ok) {
                     throw new Error('删除文章失败');
                 }
-                
+
                 loadArticles();
                 loadCategories();
                 loadStats();
-                
+
                 // 清除选中状态，隐藏删除按钮
                 const selectAll = document.getElementById('selectAll');
                 if (selectAll) selectAll.checked = false;
                 const checkboxes = document.querySelectorAll('.article-checkbox');
                 checkboxes.forEach(cb => cb.checked = false);
                 updateSelectedCount();
-                
-                alert('文章删除成功！');
+
+                alert(articleTerm(category) + '删除成功！');
             } catch (error) {
                 console.error('删除文章失败:', error);
                 alert('删除失败，请稍后重试');
@@ -5276,11 +5388,11 @@
             const articleIds = Array.from(checkedBoxes).map(cb => parseInt(cb.value));
             
             if (articleIds.length === 0) {
-                alert('请先选择要删除的文章');
+                alert('请先选择要删除的' + articleTerm(currentCategory));
                 return;
             }
-            
-            if (!confirm(`确定要删除这 ${articleIds.length} 篇文章吗？`)) {
+
+            if (!confirm(`确定要删除这 ${articleIds.length} 篇${articleTerm(currentCategory)}吗？`)) {
                 return;
             }
             
@@ -5309,7 +5421,7 @@
                     checkboxes.forEach(cb => cb.checked = false);
                     updateSelectedCount();
                     
-                    alert(`成功删除 ${successCount} 篇文章！`);
+                    alert(`成功删除 ${successCount} 篇${articleTerm(currentCategory)}！`);
                 } else {
                     throw new Error('删除文章失败');
                 }

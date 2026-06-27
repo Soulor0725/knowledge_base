@@ -37,6 +37,7 @@ def get_db():
         g.db.row_factory = sqlite3.Row
     return g.db
 
+@app.teardown_appcontext
 def close_db(e=None):
     """关闭数据库连接"""
     db = g.pop('db', None)
