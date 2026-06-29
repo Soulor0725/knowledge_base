@@ -11,3 +11,16 @@ __pycache__/
 
 # 环境变量文件（若有）
 .env
+
+# 忽略 agent / AI 辅助工具生成的目录和配置（不随项目启动一起推送）
+.mimocode/
+.copilot*
+.agent*
+
+# 忽略测试脚本（非启动所需）
+/test_*.py
+/test*.py
+/Test_Team/
+
+# 编辑器配置
+.vscode/
