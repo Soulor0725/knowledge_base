@@ -24,3 +24,6 @@ __pycache__/
 
 # 编辑器配置
 .vscode/
+
+# 忽略 CodeBuddy 指南（非启动所需）
+CODEBUDDY.md
