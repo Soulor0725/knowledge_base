@@ -1758,6 +1758,9 @@
                         <option value="香烟">香烟</option>
                         <option value="菜肉米面油">菜肉米面油</option>
                         <option value="交通">交通</option>
+                        <option value="物业费">物业费</option>
+                        <option value="水果">水果</option>
+                        <option value="其他">其他</option>
                     </select>
                 </div>
                 <div class="form-group">
@@ -3558,8 +3561,8 @@
         let expenseMonthFilter = '';
         let expenseCategoryFilter = '';
         let selectedExpenseIds = new Set();
-        const EXPENSE_CATEGORIES = ['燃气费', '电费', '话费', '网费', '香烟', '菜肉米面油', '交通'];
-        const EXPENSE_COLORS = {'燃气费':'#ef4444','电费':'#f97316','话费':'#3b82f6','网费':'#8b5cf6','香烟':'#6b7280','菜肉米面油':'#22c55e','交通':'#06b6d4'};
+        const EXPENSE_CATEGORIES = ['燃气费', '电费', '话费', '网费', '香烟', '菜肉米面油', '交通', '物业费', '水果', '其他'];
+        const EXPENSE_COLORS = {'燃气费':'#ef4444','电费':'#f97316','话费':'#3b82f6','网费':'#8b5cf6','香烟':'#6b7280','菜肉米面油':'#22c55e','交通':'#06b6d4','物业费':'#d97706','水果':'#ec4899','其他':'#a78bfa'};
 
         async function loadExpenses() {
             try {
@@ -4507,27 +4510,17 @@
                 }
                 
                 const categories = await response.json();
-                
-                // 获取总文章数来计算未分类数量
+
+                // 获取总文章数
                 const statsResponse = await fetch(`${API_URL}/stats`, {
                     headers: getAuthHeaders()
                 });
                 const stats = await statsResponse.json();
                 const totalArticles = stats.total_articles || 0;
-                const categorizedCount = categories.reduce((sum, c) => sum + (c.article_count || 0), 0);
-                const uncategorizedCount = totalArticles - categorizedCount;
-                
+
                 const select = document.getElementById('articleCategory');
                 select.innerHTML = categories.map(c => `<option value="${c.name}">${c.name}</option>`).join('');
-                const uncategorizedHTML = uncategorizedCount > 0 ? `
-                    <div class="category-item ${currentCategory === '未分类' ? 'active' : ''}" onclick="filterByCategory('未分类')">
-                        <div class="category-left"><div class="category-dot" style="background:#94a3b8;"></div><span class="category-name">未分类</span></div>
-                        <div class="category-actions">
-                            <span class="category-count">${uncategorizedCount}</span>
-                        </div>
-                    </div>
-                ` : '';
-                
+
                 document.getElementById('categoryList').innerHTML = `
                     <div class="category-item ${!currentCategory ? 'active' : ''}" onclick="showAll()">
                         <div class="category-left"><div class="category-dot" style="background:#64748b;"></div><span class="category-name">全部</span></div>
@@ -4535,7 +4528,7 @@
                             <span class="category-count">${totalArticles}</span>
                         </div>
                     </div>
-                ` + uncategorizedHTML + categories.map(c => `
+                ` + categories.map(c => `
                     <div class="category-item ${currentCategory === c.name ? 'active' : ''}" data-category="${c.name}" oncontextmenu="showCategoryContextMenu(event, '${c.name}')">
                         <div class="category-left" onclick="filterByCategory('${c.name}')"><div class="category-dot" style="background:${c.color};"></div><span class="category-name">${c.name}</span></div>
                         <div class="category-actions">

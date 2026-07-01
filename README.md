@@ -4,9 +4,9 @@
 
 ## 当前版本
 
-**v2.2.2**
+**v2.2.3**
 
-> 更新说明：优化侧栏模块圆点颜色，提升视觉辨识度。
+> 更新说明：记账新增物业费/水果/其他分类，修复分类删除后侧栏残留"未分类"。
 
 ## ✨ 功能特性
 
@@ -45,7 +45,8 @@
 
 ### 📋 消费记录模块
 - **记录管理**：支持创建、编辑、删除消费记录
-- **分类管理**：支持多种消费分类
+- **分类管理**：支持多种消费分类（燃气费、电费、话费、网费、香烟、菜肉米面油、交通、物业费、水果、其他）
+- **统计分析**：按分类汇总、饼图展示、年度月度筛选
 - **金额统计**：记录消费金额，保留2位小数
 - **日期管理**：记录消费日期
 - **导出功能**：支持导出记录到Excel（CSV格式）
@@ -184,17 +185,25 @@ auto_start.bat
 
 ```
 knowledge_base/
-├── app.py                 # 后端主文件
-├── requirements.txt       # 依赖文件
-├── VERSION.md             # 版本管理文档
-├── RELEASE_NOTES.md       # 发布说明文档
-├── static/                # 静态文件
-│   ├── index.html         # 前端界面
-│   └── uploads/           # 上传的图片
-├── start.bat              # 启动脚本
-├── auto_start.bat         # 自动启动脚本
-├── setup_autostart.ps1    # Windows自启动配置脚本
-└── README.md              # 项目文档
+├── app.py                     # 后端主文件（Flask，所有路由和业务逻辑）
+├── static/
+│   ├── index.html             # 前端界面（单文件 SPA，~5800 行）
+│   └── uploads/               # 用户上传的图片
+├── docs/                      # 架构图、PRD、交互设计文档
+├── Test_Team/                 # 测试用例和PRD文档
+├── .github/                   # GitHub Actions 工作流
+├── knowledge_base.db          # SQLite 数据库（运行时生成，已 gitignore）
+├── requirements.txt           # Python 依赖
+├── VERSION.md                 # 版本管理文档
+├── RELEASE_NOTES.md           # 发布说明文档
+├── README.md                  # 项目文档
+├── AGENTS.md                  # AI 协作指引
+├── start.bat                  # Windows 启动脚本
+├── auto_start.bat             # 自动启动脚本
+├── setup_autostart.ps1        # Windows 自启动配置脚本
+├── test_api.py                # 接口冒烟测试
+├── check_db.py                # 数据库检查工具
+└── list_tables.py             # 数据库表结构查看工具
 ```
 
 ## 📝 版本历史

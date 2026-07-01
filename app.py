@@ -5,7 +5,7 @@ import urllib.parse
 import codecs
 from flask_cors import CORS
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 from werkzeug.utils import secure_filename
 import jwt
@@ -21,7 +21,11 @@ print("="*50)
 
 app = Flask(__name__, static_folder='static')
 CORS(app)
-app.config['SECRET_KEY'] = 'your-secret-key-here'  # 实际部署时应使用环境变量
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-here-32bytes-minimum')  # 实际部署时应使用环境变量
+
+@app.route('/favicon.ico')
+def favicon():
+    return send_from_directory(app.static_folder, 'favicon.ico', mimetype='image/x-icon')
 
 DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'knowledge_base.db')
 UPLOAD_FOLDER = os.path.join('static', 'uploads')
@@ -48,7 +52,7 @@ def generate_token(user_id):
     """生成JWT token"""
     payload = {
         'user_id': user_id,
-        'exp': datetime.utcnow() + timedelta(days=7)  # 7天过期
+        'exp': datetime.now(timezone.utc) + timedelta(days=7)  # 7天过期
     }
     return jwt.encode(payload, app.config['SECRET_KEY'], algorithm='HS256')
 
@@ -579,16 +583,23 @@ def delete_category(category_id):
     if not is_numeric:
         # 不是纯数字，尝试按ID删除
         try:
-            cursor.execute('DELETE FROM categories WHERE id = ? AND user_id = ?', (int(category_id), g.user_id))
-            if cursor.rowcount > 0:
+            cursor.execute('SELECT name FROM categories WHERE id = ? AND user_id = ?', (int(category_id), g.user_id))
+            row = cursor.fetchone()
+            if row:
+                cat_name = row['name']
+                cursor.execute('DELETE FROM categories WHERE id = ? AND user_id = ?', (int(category_id), g.user_id))
+                cursor.execute("UPDATE articles SET category = '未分类' WHERE category = ? AND user_id = ?", (cat_name, g.user_id))
                 db.commit()
                 return jsonify({'message': '删除成功'})
         except (ValueError, TypeError):
             pass
     
     # 按名称删除
-    cursor.execute('DELETE FROM categories WHERE name = ? AND user_id = ?', (str(category_id), g.user_id))
+    category_name = str(category_id)
+    cursor.execute('DELETE FROM categories WHERE name = ? AND user_id = ?', (category_name, g.user_id))
     if cursor.rowcount > 0:
+        # 将引用该分类的文章设为"未分类"
+        cursor.execute("UPDATE articles SET category = '未分类' WHERE category = ? AND user_id = ?", (category_name, g.user_id))
         db.commit()
         return jsonify({'message': '删除成功'})
     
@@ -1223,7 +1234,7 @@ def get_overtime_stats():
     })
 
 # ===== 记账模块 API =====
-EXPENSE_CATEGORIES = ['燃气费', '电费', '话费', '网费', '香烟', '菜肉米面油', '交通']
+EXPENSE_CATEGORIES = ['燃气费', '电费', '话费', '网费', '香烟', '菜肉米面油', '交通', '物业费', '水果', '其他']
 
 @app.route('/api/expenses', methods=['GET'])
 @login_required
