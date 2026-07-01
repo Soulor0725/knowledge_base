@@ -142,6 +142,7 @@ tail -f /opt/knowledge_base/error.log  # 错误日志
 |------|------|
 | `deploy.sh` | 一键部署脚本（首次安装） |
 | `update.sh` | 更新脚本（拉取代码+重启） |
+| `docs/ALIYUN_DEPLOY.md` | 阿里云部署详细教程 |
 | `/opt/knowledge_base/.env` | 密钥文件（自动生成，勿提交） |
 | `/opt/knowledge_base/knowledge_base.db` | SQLite 数据库 |
 
