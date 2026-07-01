@@ -20,8 +20,9 @@ print(f"工作目录: {os.getcwd()}")
 print("="*50)
 
 app = Flask(__name__, static_folder='static')
-CORS(app)
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-here-32bytes-minimum')  # 实际部署时应使用环境变量
+CORS(app, origins=['http://localhost:5001', 'http://127.0.0.1:5001'])
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or os.urandom(32).hex()
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB 上传大小限制
 
 @app.route('/favicon.ico')
 def favicon():
@@ -210,24 +211,16 @@ def init_db():
     conn.commit()
     conn.close()
 
-@app.route('/api/test', methods=['GET'])
-def test():
-    """测试路由"""
-    return jsonify({'message': 'Test endpoint works!'})
-
-@app.route('/api/test2')
-def test2():
-    """测试路由2"""
-    return jsonify({'message': 'Test2 endpoint works!'})
-
 @app.route('/api/auth/register', methods=['POST'])
 def register():
     """用户注册"""
     data = request.get_json()
-    username = data.get('username').strip()
+    if not data:
+        return jsonify({'error': '请求数据不能为空'}), 400
+    username = (data.get('username') or '').strip()
     password = data.get('password')
-    name = data.get('name', '').strip()  # 添加中文名字字段
-    
+    name = (data.get('name') or '').strip()
+
     if not username or not password:
         return jsonify({'error': '用户名和密码不能为空'}), 400
     
@@ -252,7 +245,9 @@ def register():
 def login():
     """用户登录"""
     data = request.get_json()
-    username = data.get('username').strip()
+    if not data:
+        return jsonify({'error': '请求数据不能为空'}), 400
+    username = (data.get('username') or '').strip()
     password = data.get('password')
     
     if not username or not password:
@@ -561,6 +556,11 @@ def create_category():
     color = data.get('color', '#667eea')
     if not name:
         return jsonify({'error': '分类名称不能为空'}), 400
+    if len(name) > 50:
+        return jsonify({'error': '分类名称不能超过50个字符'}), 400
+    import re
+    if re.search(r'[<>"\'&]', name):
+        return jsonify({'error': '分类名称不能包含特殊字符'}), 400
     db = get_db()
     cursor = db.cursor()
     try:
@@ -1531,6 +1531,45 @@ def get_expenses_stats():
         categories.append({'category': row['category'], 'amount': round(total, 2), 'percentage': pct})
 
     return jsonify({'categories': categories, 'grand_total': round(grand_total, 2)})
+
+
+@app.route('/api/expenses/stats/monthly', methods=['GET'])
+@login_required
+def get_expenses_stats_monthly():
+    year = request.args.get('year', '', type=str)
+    start_month = request.args.get('start_month', '', type=str)
+    end_month = request.args.get('end_month', '', type=str)
+
+    db = get_db()
+    cursor = db.cursor()
+
+    conditions = ['user_id = ?']
+    params = [g.user_id]
+
+    if year:
+        conditions.append("strftime('%Y', date) = ?")
+        params.append(year)
+    if start_month:
+        conditions.append("strftime('%m', date) >= ?")
+        params.append(start_month)
+    if end_month:
+        conditions.append("strftime('%m', date) <= ?")
+        params.append(end_month)
+
+    where_clause = ' AND '.join(conditions)
+
+    cursor.execute(
+        f"SELECT strftime('%m', date) as month, SUM(amount) as total "
+        f"FROM expenses WHERE {where_clause} GROUP BY month ORDER BY month",
+        params
+    )
+    rows = cursor.fetchall()
+
+    months = []
+    for row in rows:
+        months.append({'month': row['month'], 'total': round(row['total'] or 0, 2)})
+
+    return jsonify({'months': months})
 
 
 if __name__ == '__main__':
