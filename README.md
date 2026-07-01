@@ -106,6 +106,45 @@ auto_start.bat
 - **本地访问**：http://localhost:5001
 - **内网访问**：http://[你的IP地址]:5001
 
+## ☁️ 云服务器部署
+
+### 一键部署（Ubuntu）
+
+```bash
+# 上传项目到服务器后
+sudo bash deploy.sh
+```
+
+脚本自动完成：安装依赖 → 创建虚拟环境 → 生成密钥 → 配置 systemd 服务 → 配置 Nginx
+
+如需 HTTPS，在 `deploy.sh` 中设置 `DOMAIN=你的域名` 后重新运行。
+
+### 更新部署
+
+```bash
+sudo bash update.sh
+```
+
+自动备份数据库 → 拉取最新代码 → 重启服务。
+
+### 手动管理
+
+```bash
+systemctl status echo       # 查看状态
+systemctl restart echo      # 重启服务
+journalctl -u echo -f       # 查看日志
+tail -f /opt/knowledge_base/error.log  # 错误日志
+```
+
+### 部署文件说明
+
+| 文件 | 说明 |
+|------|------|
+| `deploy.sh` | 一键部署脚本（首次安装） |
+| `update.sh` | 更新脚本（拉取代码+重启） |
+| `/opt/knowledge_base/.env` | 密钥文件（自动生成，勿提交） |
+| `/opt/knowledge_base/knowledge_base.db` | SQLite 数据库 |
+
 ## 📝 使用指南
 
 ### 知识库模块
