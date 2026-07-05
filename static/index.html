@@ -4,9 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Echo</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/easymde@2.18.0/dist/easymde.min.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css">
+    <link rel="stylesheet" href="vendor/easymde/easymde.min.css">
+    <link rel="stylesheet" href="vendor/codemirror/lib/codemirror.min.css">
+    <link rel="stylesheet" href="vendor/codemirror/addon/fold/foldgutter.min.css">
+    <link rel="stylesheet" href="vendor/font-awesome/css/font-awesome.min.css">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -1852,22 +1853,23 @@
 
 
 
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/lib/codemirror.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/mode/markdown/markdown.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/mode/python/python.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/mode/javascript/javascript.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/mode/htmlmixed/htmlmixed.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/mode/css/css.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/addon/edit/matchbrackets.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/addon/edit/closebrackets.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/addon/fold/foldcode.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/addon/fold/foldgutter.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/addon/fold/brace-fold.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/addon/fold/markdown-fold.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/easymde@2.18.0/dist/easymde.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js"></script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css">
-    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+    <script src="vendor/codemirror/lib/codemirror.min.js"></script>
+    <script src="vendor/codemirror/mode/xml/xml.min.js"></script>
+    <script src="vendor/codemirror/mode/markdown/markdown.min.js"></script>
+    <script src="vendor/codemirror/mode/python/python.min.js"></script>
+    <script src="vendor/codemirror/mode/javascript/javascript.min.js"></script>
+    <script src="vendor/codemirror/mode/htmlmixed/htmlmixed.min.js"></script>
+    <script src="vendor/codemirror/mode/css/css.min.js"></script>
+    <script src="vendor/codemirror/addon/edit/matchbrackets.min.js"></script>
+    <script src="vendor/codemirror/addon/edit/closebrackets.min.js"></script>
+    <script src="vendor/codemirror/addon/fold/foldcode.min.js"></script>
+    <script src="vendor/codemirror/addon/fold/foldgutter.min.js"></script>
+    <script src="vendor/codemirror/addon/fold/brace-fold.min.js"></script>
+    <script src="vendor/codemirror/addon/fold/markdown-fold.min.js"></script>
+    <script src="vendor/easymde/easymde.min.js"></script>
+    <script src="vendor/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="vendor/highlight.js/styles/github-dark.min.css">
+    <script src="vendor/highlight.js/build/highlight.min.js"></script>
     <script>
         // If hljs is available, run a global highlight pass after load
         if (typeof hljs !== 'undefined' && typeof hljs.highlightAll === 'function') {
@@ -3076,7 +3078,9 @@
                     <div class="main-article-address" style="flex: 2; color: #94a3b8; font-size: 12px; text-align: left; padding: 0 5px; word-break: break-word;">${escapeHtml(sale.address)}</div>
                     <div class="main-article-order-date" style="flex: 1; color: #94a3b8; font-size: 12px; text-align: center; white-space: nowrap;">${sale.order_date}</div>
                     <div class="main-article-status" style="flex: 1; text-align: center;"><span class="status-pill ${(sale.status === '已发货') ? 'shipped' : 'unshipped'}">${sale.status || '未发货'}</span></div>
-                    <div class="main-article-tracking" style="flex: 1.5; color: #94a3b8; font-size: 12px; text-align: left; padding: 0 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${sale.tracking_number || '-'}</div>
+                    <div class="main-article-tracking" style="flex: 1.5; font-size: 12px; text-align: left; padding: 0 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                        ${sale.tracking_number ? `<a href="https://www.kuaidi100.com/?nu=${encodeURIComponent(sale.tracking_number)}" target="_blank" style="color: #60a5fa; text-decoration: none; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'" title="点击查看物流信息"><i class="fa fa-truck" style="font-size: 10px;"></i>${escapeHtml(sale.tracking_number)}</a>` : '<span style="color: #94a3b8;">-</span>'}
+                    </div>
                     <div class="main-article-remark" style="flex: 0.8; color: #94a3b8; font-size: 12px; text-align: center;">${sale.remark || '-'}</div>
                     <div class="main-article-quantity" style="flex: 0.6; color: #94a3b8; font-size: 12px; text-align: center;">${sale.quantity || 0}</div>
                     <div class="main-article-payment" style="flex: 0.8; color: #2dd4bf; font-size: 12px; font-weight: 600; text-align: center;">${(sale.payment_amount || 0).toFixed(2)}</div>
@@ -5787,7 +5791,7 @@
             if (typeof marked === 'undefined') {
                 console.log('Marked.js not loaded, loading now...');
                 const script = document.createElement('script');
-                script.src = 'https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js';
+                script.src = 'vendor/marked/marked.min.js';
                 script.onload = function() {
                     console.log('Marked.js loaded successfully');
                     renderArticle(id);

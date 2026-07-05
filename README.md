@@ -4,9 +4,9 @@
 
 ## 当前版本
 
-**v2.4.0**
+**v2.5.0**
 
-> 更新说明：加班模块新增手动时长修改、月加班统计（20日-20日周期）、加班时长始终随前端同步。
+> 更新说明：运单号点击查询物流、系统完全离线可用（所有前端依赖本地化）。
 
 ## ✨ 功能特性
 
@@ -31,6 +31,7 @@
 - **金额统计**：记录支付金额，保留2位小数
 - **状态管理**：支持已发货、未发货状态
 - **运单管理**：支持记录运单号码
+- **物流查询**：点击运单号直接跳转快递100查询物流信息（v2.5.0）
 - **导出功能**：支持导出订单到Excel（CSV格式）
   - 支持多选导出
   - 支持全选导出
@@ -68,9 +69,11 @@
 - **后端**：Python Flask
 - **前端**：HTML5, CSS3, JavaScript
 - **数据库**：SQLite
-- **Markdown 解析**：Marked.js
-- **代码高亮**：CodeMirror
-- **图标**：Font Awesome
+- **Markdown 解析**：Marked.js（本地化）
+- **代码编辑**：CodeMirror + EasyMDE（本地化）
+- **代码高亮**：highlight.js（本地化）
+- **图标**：Font Awesome 4.7（本地化）
+- **离线支持**：所有前端依赖已本地化，无需联网即可使用
 
 ## 📦 安装步骤
 
@@ -195,9 +198,18 @@ auto_start.bat
 knowledge_base/
 ├── app.py                     # 后端主文件（Flask，所有路由和业务逻辑，~1630 行）
 ├── static/
-│   ├── index.html             # 前端界面（单文件 SPA，~5940 行）
+│   ├── index.html             # 前端界面（单文件 SPA，~5960 行）
 │   ├── favicon.ico
-│   └── uploads/               # 用户上传的图片（已 gitignore）
+│   ├── uploads/               # 用户上传的图片（已 gitignore）
+│   └── vendor/                # 本地化前端依赖（离线可用）
+│       ├── codemirror/        # 代码编辑器
+│       │   ├── lib/           # 核心库
+│       │   ├── mode/          # 语言模式（markdown/python/js/html/css/xml）
+│       │   └── addon/         # 插件（编辑/折叠）
+│       ├── easymde/           # Markdown 编辑器
+│       ├── font-awesome/      # 图标库（CSS + 字体文件）
+│       ├── highlight.js/      # 代码语法高亮
+│       └── marked/            # Markdown 解析器
 ├── docs/                      # 架构图、PRD、交互设计文档、Playwright 设置
 ├── .github/
 │   └── workflows/
