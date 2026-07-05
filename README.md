@@ -6,7 +6,7 @@
 
 **v2.5.0**
 
-> 更新说明：运单号点击查询物流、系统完全离线可用（所有前端依赖本地化）。
+> 更新说明：运单号点击查询物流信息。
 
 ## ✨ 功能特性
 
@@ -69,11 +69,9 @@
 - **后端**：Python Flask
 - **前端**：HTML5, CSS3, JavaScript
 - **数据库**：SQLite
-- **Markdown 解析**：Marked.js（本地化）
-- **代码编辑**：CodeMirror + EasyMDE（本地化）
-- **代码高亮**：highlight.js（本地化）
-- **图标**：Font Awesome 4.7（本地化）
-- **离线支持**：所有前端依赖已本地化，无需联网即可使用
+- **Markdown 解析**：Marked.js
+- **代码高亮**：CodeMirror
+- **图标**：Font Awesome
 
 ## 📦 安装步骤
 
@@ -198,18 +196,9 @@ auto_start.bat
 knowledge_base/
 ├── app.py                     # 后端主文件（Flask，所有路由和业务逻辑，~1630 行）
 ├── static/
-│   ├── index.html             # 前端界面（单文件 SPA，~5960 行）
+│   ├── index.html             # 前端界面（单文件 SPA，~5940 行）
 │   ├── favicon.ico
-│   ├── uploads/               # 用户上传的图片（已 gitignore）
-│   └── vendor/                # 本地化前端依赖（离线可用）
-│       ├── codemirror/        # 代码编辑器
-│       │   ├── lib/           # 核心库
-│       │   ├── mode/          # 语言模式（markdown/python/js/html/css/xml）
-│       │   └── addon/         # 插件（编辑/折叠）
-│       ├── easymde/           # Markdown 编辑器
-│       ├── font-awesome/      # 图标库（CSS + 字体文件）
-│       ├── highlight.js/      # 代码语法高亮
-│       └── marked/            # Markdown 解析器
+│   └── uploads/               # 用户上传的图片（已 gitignore）
 ├── docs/                      # 架构图、PRD、交互设计文档、Playwright 设置
 ├── .github/
 │   └── workflows/
