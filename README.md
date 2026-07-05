@@ -55,6 +55,14 @@
   - 无选择时导出当前月数据
   - 编码完美支持Excel（GBK编码）
 
+### ⏰ 加班管理模块
+- **加班记录**：支持平时加班（19:00-23:59）和周末加班（09:00-23:00）
+- **时长计算**：自动计算加班时长，支持手动修改
+- **月度统计**：按自然月统计平时/周末加班时长和记录数
+- **周期统计**：按上月20日至本月20日周期统计加班时长
+- **同日唯一**：同一天只能有一条加班记录
+- **批量删除**：支持批量删除加班记录
+
 ## 🛠️ 技术栈
 
 - **后端**：Python Flask
@@ -69,8 +77,8 @@
 ### 1. 克隆仓库
 
 ```bash
-git clone https://github.com/Soulor0725/personal-knowledge-base.git
-cd personal-knowledge-base
+git clone https://github.com/Soulor0725/knowledge_base.git
+cd knowledge_base
 ```
 
 ### 2. 安装依赖
@@ -233,7 +241,7 @@ if __name__ == '__main__':
 
 ### 分页配置
 
-销售报表默认每页显示10个客户，可在 `static/index.html` 中修改 `REPORT_PAGE_SIZE` 常量。
+各模块分页默认每页5条，可在 `static/index.html` 中修改对应 `pageSize` 变量（如 `kiwiReportPageSize`、`expensePageSize`）。
 
 ## 🤝 贡献
 
