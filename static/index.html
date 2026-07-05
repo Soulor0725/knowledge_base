@@ -1705,7 +1705,7 @@
                     <label>加班类型</label>
                     <select id="overtimeType" required onchange="onOvertimeTypeChange()">
                         <option value="weekday">平时加班（19:00-23:59）</option>
-                        <option value="weekend">周末加班（09:00-23:00）</option>
+                        <option value="weekend">周末加班（08:30-23:59）</option>
                     </select>
                 </div>
                 <div class="form-group">
@@ -4326,10 +4326,10 @@
                 endEl.min = '19:00';
                 endEl.max = '23:59';
             } else {
-                startEl.min = '09:00';
-                startEl.max = '23:00';
-                endEl.min = '09:00';
-                endEl.max = '23:00';
+                startEl.min = '08:30';
+                startEl.max = '23:59';
+                endEl.min = '08:30';
+                endEl.max = '23:59';
             }
             calcOvertimeDuration();
         }

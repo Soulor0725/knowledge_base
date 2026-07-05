@@ -1101,8 +1101,8 @@ def add_overtime_record():
 
     # 周末加班时间范围校验
     if overtime_type == 'weekend':
-        if start_time < '09:00' or end_time > '23:00':
-            return jsonify({'error': '周末加班时间范围为 09:00-23:00'}), 400
+        if start_time < '08:30' or end_time > '23:59':
+            return jsonify({'error': '周末加班时间范围为 08:30-23:59'}), 400
 
     # 检查同一天是否已有加班记录
     db = get_db()
@@ -1161,8 +1161,8 @@ def update_overtime_record(record_id):
             return jsonify({'error': '平时加班结束时间需在 19:00-23:59 范围内'}), 400
 
     if overtime_type == 'weekend':
-        if start_time < '09:00' or end_time > '23:00':
-            return jsonify({'error': '周末加班时间范围为 09:00-23:00'}), 400
+        if start_time < '08:30' or end_time > '23:59':
+            return jsonify({'error': '周末加班时间范围为 08:30-23:59'}), 400
 
     manual_duration = data.get('duration')
     if manual_duration is not None:
