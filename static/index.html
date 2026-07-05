@@ -1723,8 +1723,8 @@
                     </div>
                 </div>
                 <div class="form-group">
-                    <label>时长（小时）</label>
-                    <input type="text" id="overtimeDuration" readonly style="background: rgba(30, 41, 59, 0.5); color: #60a5fa; font-weight: 600;">
+                    <label>时长（小时）<span id="overtimeDurationHint" style="font-size:11px;color:#64748b;margin-left:4px;">自动计算</span></label>
+                    <input type="text" id="overtimeDuration" style="background: rgba(30, 41, 59, 0.5); color: #60a5fa; font-weight: 600;" onchange="onManualDurationChange()" placeholder="自动计算">
                 </div>
                 <div class="form-group">
                     <label>工作内容</label>
@@ -4313,7 +4313,10 @@
             loadOvertimeRecords();
         }
 
+        let isManualDuration = false;
+
         function onOvertimeTypeChange() {
+            isManualDuration = false;
             const type = document.getElementById('overtimeType').value;
             const startEl = document.getElementById('overtimeStartTime');
             const endEl = document.getElementById('overtimeEndTime');
@@ -4332,6 +4335,9 @@
         }
 
         function calcOvertimeDuration() {
+            if (isManualDuration) return;
+            const hint = document.getElementById('overtimeDurationHint');
+            if (hint) hint.textContent = '自动计算';
             const type = document.getElementById('overtimeType').value;
             const start = document.getElementById('overtimeStartTime').value;
             const end = document.getElementById('overtimeEndTime').value;
@@ -4359,10 +4365,19 @@
             durationEl.value = (diffMin / 60).toFixed(1) + ' 小时';
         }
 
+        function onManualDurationChange() {
+            isManualDuration = true;
+            const hint = document.getElementById('overtimeDurationHint');
+            if (hint) hint.textContent = '手动输入';
+        }
+
+        let overtimeTab = 'records'; // 'records' or 'monthly'
+
         function showOvertime() {
             window.scrollTo(0, 0);
             overtimeCurrentPage = 1;
             overtimeMonthFilter = '';
+            overtimeTab = 'records';
             selectedOvertimeIds.clear();
             const toolbar = document.querySelector('.toolbar');
             if (toolbar) toolbar.style.display = 'none';
@@ -4378,10 +4393,42 @@
                         </div>
                     </div>
                     <div id="overtimeStats" style="margin-bottom:20px;"></div>
+                    <div style="display:flex;gap:0;margin-bottom:20px;border-bottom:1px solid rgba(148,163,184,0.15);">
+                        <button onclick="switchOvertimeTab('records')" id="overtimeTabRecords" style="padding:10px 20px;border:none;background:none;color:#f472b6;font-size:13px;font-weight:600;border-bottom:2px solid #f472b6;cursor:pointer;transition:all 0.2s;">加班记录</button>
+                        <button onclick="switchOvertimeTab('monthly')" id="overtimeTabMonthly" style="padding:10px 20px;border:none;background:none;color:#94a3b8;font-size:13px;font-weight:500;border-bottom:2px solid transparent;cursor:pointer;transition:all 0.2s;">月加班统计</button>
+                    </div>
+                    <div id="overtimeTabContent"></div>
+                </div>
+            `;
+            overtimeMonthFilter = defaultMonth;
+            renderOvertimeRecordsTab();
+        }
+
+        function switchOvertimeTab(tab) {
+            overtimeTab = tab;
+            document.getElementById('overtimeTabRecords').style.color = tab === 'records' ? '#f472b6' : '#94a3b8';
+            document.getElementById('overtimeTabRecords').style.fontWeight = tab === 'records' ? '600' : '500';
+            document.getElementById('overtimeTabRecords').style.borderBottom = tab === 'records' ? '2px solid #f472b6' : '2px solid transparent';
+            document.getElementById('overtimeTabMonthly').style.color = tab === 'monthly' ? '#f472b6' : '#94a3b8';
+            document.getElementById('overtimeTabMonthly').style.fontWeight = tab === 'monthly' ? '600' : '500';
+            document.getElementById('overtimeTabMonthly').style.borderBottom = tab === 'monthly' ? '2px solid #f472b6' : '2px solid transparent';
+            if (tab === 'records') {
+                renderOvertimeRecordsTab();
+            } else {
+                renderOvertimeMonthlyTab();
+            }
+        }
+
+        function renderOvertimeRecordsTab() {
+            const now = new Date();
+            const defaultMonth = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+            if (!overtimeMonthFilter) overtimeMonthFilter = defaultMonth;
+            document.getElementById('overtimeTabContent').innerHTML = `
+                <div id="overtimeRecordsPanel">
                     <div style="display:flex;align-items:center;margin-bottom:15px;gap:10px;">
                         <div style="display:flex;align-items:center;gap:8px;">
                             <label style="font-size:12px;color:#94a3b8;">月份：</label>
-                            <input type="month" id="overtimeMonthFilter" value="${defaultMonth}" onchange="filterOvertimeByMonth()" style="padding:8px 12px;border:1px solid rgba(148,163,184,0.2);border-radius:6px;background:rgba(30,41,59,0.8);color:#cbd5e1;font-size:12px;">
+                            <input type="month" id="overtimeMonthFilter" value="${overtimeMonthFilter}" onchange="filterOvertimeByMonth()" style="padding:8px 12px;border:1px solid rgba(148,163,184,0.2);border-radius:6px;background:rgba(30,41,59,0.8);color:#cbd5e1;font-size:12px;">
                         </div>
                         <button class="btn btn-secondary" onclick="resetOvertimeFilter()" style="padding:8px 16px;font-size:12px;font-weight:500;"><i class="fa fa-refresh"></i> 重置</button>
                         <button class="btn btn-danger" id="deleteSelectedOvertimeBtn" onclick="deleteSelectedOvertimeRecords()" style="padding:8px 16px;font-size:12px;font-weight:500;display:none;"><i class="fa fa-trash"></i> 删除选中 (<span id="selectedOvertimeCount">0</span>)</button>
@@ -4395,8 +4442,64 @@
                     <div id="overtimePagination" style="display:flex;justify-content:center;align-items:center;gap:6px;margin-top:16px;flex-wrap:wrap;"></div>
                 </div>
             `;
-            overtimeMonthFilter = defaultMonth;
             loadOvertimeRecords();
+        }
+
+        function renderOvertimeMonthlyTab() {
+            const now = new Date();
+            const defaultMonth = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+            document.getElementById('overtimeTabContent').innerHTML = `
+                <div id="overtimeMonthlyPanel">
+                    <div style="display:flex;align-items:center;margin-bottom:20px;gap:10px;">
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <label style="font-size:12px;color:#94a3b8;">统计月份：</label>
+                            <input type="month" id="overtimeMonthlyFilter" value="${defaultMonth}" onchange="loadOvertimeMonthlyStats()" style="padding:8px 12px;border:1px solid rgba(148,163,184,0.2);border-radius:6px;background:rgba(30,41,59,0.8);color:#cbd5e1;font-size:12px;">
+                        </div>
+                    </div>
+                    <div id="overtimeMonthlyPeriod" style="margin-bottom:16px;padding:12px 16px;background:rgba(30,41,59,0.4);border:1px solid rgba(148,163,184,0.1);border-radius:8px;color:#94a3b8;font-size:13px;"></div>
+                    <div id="overtimeMonthlyStats"></div>
+                </div>
+            `;
+            loadOvertimeMonthlyStats();
+        }
+
+        async function loadOvertimeMonthlyStats() {
+            const month = document.getElementById('overtimeMonthlyFilter').value;
+            if (!month) return;
+            try {
+                const response = await fetch(`${API_URL}/overtime/stats/monthly?month=${month}`, { headers: getAuthHeaders() });
+                if (!response.ok) return;
+                const stats = await response.json();
+                const periodEl = document.getElementById('overtimeMonthlyPeriod');
+                if (periodEl) {
+                    periodEl.innerHTML = `<i class="fa fa-calendar" style="margin-right:6px;color:#60a5fa;"></i>统计周期：<strong style="color:#cbd5e1;">${stats.period_start}</strong> 至 <strong style="color:#cbd5e1;">${stats.period_end}</strong>（共 ${stats.total_count} 条记录）`;
+                }
+                const statsEl = document.getElementById('overtimeMonthlyStats');
+                if (statsEl) {
+                    statsEl.innerHTML = `
+                        <div style="display:flex;gap:16px;flex-wrap:wrap;">
+                            <div style="flex:1;min-width:140px;background:rgba(244,114,182,0.1);border:1px solid rgba(244,114,182,0.2);border-radius:10px;padding:16px;text-align:center;">
+                                <div style="font-size:24px;font-weight:700;color:#f472b6;">${parseFloat(stats.weekday_total).toFixed(1)}</div>
+                                <div style="font-size:12px;color:#94a3b8;margin-top:4px;">平时加班(h)</div>
+                            </div>
+                            <div style="flex:1;min-width:140px;background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.2);border-radius:10px;padding:16px;text-align:center;">
+                                <div style="font-size:24px;font-weight:700;color:#3b82f6;">${parseFloat(stats.weekend_total).toFixed(1)}</div>
+                                <div style="font-size:12px;color:#94a3b8;margin-top:4px;">周末加班(h)</div>
+                            </div>
+                            <div style="flex:1;min-width:140px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.2);border-radius:10px;padding:16px;text-align:center;">
+                                <div style="font-size:24px;font-weight:700;color:#22c55e;">${parseFloat(stats.total_hours).toFixed(1)}</div>
+                                <div style="font-size:12px;color:#94a3b8;margin-top:4px;">总加班(h)</div>
+                            </div>
+                            <div style="flex:1;min-width:140px;background:rgba(168,85,247,0.1);border:1px solid rgba(168,85,247,0.2);border-radius:10px;padding:16px;text-align:center;">
+                                <div style="font-size:24px;font-weight:700;color:#a855f7;">${stats.total_count}</div>
+                                <div style="font-size:12px;color:#94a3b8;margin-top:4px;">记录条数</div>
+                            </div>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                console.error('加载月度统计失败:', error);
+            }
         }
 
         function filterOvertimeByMonth() {
@@ -4414,11 +4517,13 @@
         }
 
         function openOvertimeModal(id = null) {
+            isManualDuration = false;
             document.getElementById('overtimeModal').classList.add('active');
             document.getElementById('overtimeForm').reset();
             document.getElementById('overtimeRecordId').value = '';
             document.getElementById('overtimeModalTitle').textContent = '新增加班记录';
             document.getElementById('overtimeDuration').value = '';
+            document.getElementById('overtimeDurationHint').textContent = '自动计算';
             onOvertimeTypeChange();
             if (id) {
                 const r = overtimeData.find(x => x.id === id);
@@ -4432,6 +4537,7 @@
                     document.getElementById('overtimeModalTitle').textContent = '编辑加班记录';
                     onOvertimeTypeChange();
                     document.getElementById('overtimeDuration').value = parseFloat(r.duration).toFixed(1) + ' 小时';
+                    document.getElementById('overtimeDurationHint').textContent = '可手动修改';
                 }
             }
         }
@@ -4443,6 +4549,7 @@
         async function saveOvertimeRecord(event) {
             event.preventDefault();
             const id = document.getElementById('overtimeRecordId').value;
+            const durationText = document.getElementById('overtimeDuration').value.trim();
             const data = {
                 overtime_type: document.getElementById('overtimeType').value,
                 date: document.getElementById('overtimeDate').value,
@@ -4450,6 +4557,10 @@
                 end_time: document.getElementById('overtimeEndTime').value,
                 remark: document.getElementById('overtimeRemark').value.trim()
             };
+            const parsed = parseFloat(durationText);
+            if (!isNaN(parsed) && parsed > 0) {
+                data.duration = parsed;
+            }
             if (!data.date) { alert('请选择日期'); return; }
             if (!data.start_time || !data.end_time) { alert('请填写开始和结束时间'); return; }
             try {

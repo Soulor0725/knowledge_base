@@ -1111,7 +1111,16 @@ def add_overtime_record():
     if cursor.fetchone():
         return jsonify({'error': '该日期已存在加班记录，请删除后再添加'}), 400
 
-    duration = calculate_overtime_duration(overtime_type, start_time, end_time)
+    manual_duration = data.get('duration')
+    if manual_duration is not None:
+        try:
+            duration = float(manual_duration)
+            if duration <= 0:
+                return jsonify({'error': '时长必须大于0'}), 400
+        except (ValueError, TypeError):
+            return jsonify({'error': '时长格式错误'}), 400
+    else:
+        duration = calculate_overtime_duration(overtime_type, start_time, end_time)
 
     cursor.execute('INSERT INTO overtime_records (overtime_type, date, start_time, end_time, duration, remark, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
                    (overtime_type, date, start_time, end_time, duration, remark, g.user_id))
@@ -1155,7 +1164,16 @@ def update_overtime_record(record_id):
         if start_time < '09:00' or end_time > '23:00':
             return jsonify({'error': '周末加班时间范围为 09:00-23:00'}), 400
 
-    duration = calculate_overtime_duration(overtime_type, start_time, end_time)
+    manual_duration = data.get('duration')
+    if manual_duration is not None:
+        try:
+            duration = float(manual_duration)
+            if duration <= 0:
+                return jsonify({'error': '时长必须大于0'}), 400
+        except (ValueError, TypeError):
+            return jsonify({'error': '时长格式错误'}), 400
+    else:
+        duration = calculate_overtime_duration(overtime_type, start_time, end_time)
 
     db = get_db()
     cursor = db.cursor()
@@ -1231,6 +1249,57 @@ def get_overtime_stats():
         'weekend_total': round(weekend_total, 1),
         'total_hours': round(weekday_total + weekend_total, 1),
         'total_count': total_count
+    })
+
+# 加班月度统计（按上月20日到本月20日周期）
+@app.route('/api/overtime/stats/monthly', methods=['GET'])
+@login_required
+def get_overtime_monthly_stats():
+    month = request.args.get('month', '', type=str)
+    if not month:
+        return jsonify({'error': '请提供month参数 (YYYY-MM)'}), 400
+
+    from datetime import datetime as dt
+    try:
+        target = dt.strptime(month, '%Y-%m')
+    except ValueError:
+        return jsonify({'error': '月份格式错误，请使用 YYYY-MM'}), 400
+
+    # 统计周期：上月20日 到 本月20日
+    period_start_month = target.month - 1 if target.month > 1 else 12
+    period_start_year = target.year if target.month > 1 else target.year - 1
+    period_start = f"{period_start_year}-{period_start_month:02d}-20"
+    period_end = f"{target.year}-{target.month:02d}-20"
+
+    db = get_db()
+    cursor = db.cursor()
+
+    cursor.execute(
+        "SELECT SUM(duration) FROM overtime_records WHERE user_id = ? AND overtime_type = 'weekday' AND date >= ? AND date < ?",
+        (g.user_id, period_start, period_end)
+    )
+    weekday_total = cursor.fetchone()[0] or 0
+
+    cursor.execute(
+        "SELECT SUM(duration) FROM overtime_records WHERE user_id = ? AND overtime_type = 'weekend' AND date >= ? AND date < ?",
+        (g.user_id, period_start, period_end)
+    )
+    weekend_total = cursor.fetchone()[0] or 0
+
+    cursor.execute(
+        "SELECT COUNT(*) FROM overtime_records WHERE user_id = ? AND date >= ? AND date < ?",
+        (g.user_id, period_start, period_end)
+    )
+    total_count = cursor.fetchone()[0]
+
+    return jsonify({
+        'period_start': period_start,
+        'period_end': period_end,
+        'weekday_total': round(weekday_total, 1),
+        'weekend_total': round(weekend_total, 1),
+        'total_hours': round(weekday_total + weekend_total, 1),
+        'total_count': total_count,
+        'month': month
     })
 
 # ===== 记账模块 API =====

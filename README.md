@@ -4,9 +4,9 @@
 
 ## 当前版本
 
-**v2.3.0**
+**v2.4.0**
 
-> 更新说明：安全加固（SECRET_KEY/CORS/XSS修复）、记账新增月度趋势图、分类名注入防护。
+> 更新说明：加班模块新增手动时长修改、月加班统计（20日-20日周期）、加班时长始终随前端同步。
 
 ## ✨ 功能特性
 
@@ -106,46 +106,6 @@ auto_start.bat
 - **本地访问**：http://localhost:5001
 - **内网访问**：http://[你的IP地址]:5001
 
-## ☁️ 云服务器部署
-
-### 一键部署（Ubuntu）
-
-```bash
-# 上传项目到服务器后
-sudo bash deploy.sh
-```
-
-脚本自动完成：安装依赖 → 创建虚拟环境 → 生成密钥 → 配置 systemd 服务 → 配置 Nginx
-
-如需 HTTPS，在 `deploy.sh` 中设置 `DOMAIN=你的域名` 后重新运行。
-
-### 更新部署
-
-```bash
-sudo bash update.sh
-```
-
-自动备份数据库 → 拉取最新代码 → 重启服务。
-
-### 手动管理
-
-```bash
-systemctl status echo       # 查看状态
-systemctl restart echo      # 重启服务
-journalctl -u echo -f       # 查看日志
-tail -f /opt/knowledge_base/error.log  # 错误日志
-```
-
-### 部署文件说明
-
-| 文件 | 说明 |
-|------|------|
-| `deploy.sh` | 一键部署脚本（首次安装） |
-| `update.sh` | 更新脚本（拉取代码+重启） |
-| `docs/ALIYUN_DEPLOY.md` | 阿里云部署详细教程 |
-| `/opt/knowledge_base/.env` | 密钥文件（自动生成，勿提交） |
-| `/opt/knowledge_base/knowledge_base.db` | SQLite 数据库 |
-
 ## 📝 使用指南
 
 ### 知识库模块
@@ -225,25 +185,31 @@ tail -f /opt/knowledge_base/error.log  # 错误日志
 
 ```
 knowledge_base/
-├── app.py                     # 后端主文件（Flask，所有路由和业务逻辑）
+├── app.py                     # 后端主文件（Flask，所有路由和业务逻辑，~1630 行）
 ├── static/
-│   ├── index.html             # 前端界面（单文件 SPA，~5800 行）
-│   └── uploads/               # 用户上传的图片
-├── docs/                      # 架构图、PRD、交互设计文档
-├── Test_Team/                 # 测试用例和PRD文档
-├── .github/                   # GitHub Actions 工作流
+│   ├── index.html             # 前端界面（单文件 SPA，~5940 行）
+│   ├── favicon.ico
+│   └── uploads/               # 用户上传的图片（已 gitignore）
+├── docs/                      # 架构图、PRD、交互设计文档、Playwright 设置
+├── .github/
+│   └── workflows/
+│       └── playwright.yml     # Playwright E2E 测试 CI
 ├── knowledge_base.db          # SQLite 数据库（运行时生成，已 gitignore）
 ├── requirements.txt           # Python 依赖
+├── AGENTS.md                  # AI 协作指引
+├── CLAUDE.md                  # Claude Code 指引
+├── README.md                  # 项目文档
 ├── VERSION.md                 # 版本管理文档
 ├── RELEASE_NOTES.md           # 发布说明文档
-├── README.md                  # 项目文档
-├── AGENTS.md                  # AI 协作指引
 ├── start.bat                  # Windows 启动脚本
 ├── auto_start.bat             # 自动启动脚本
 ├── setup_autostart.ps1        # Windows 自启动配置脚本
+├── deploy.sh                  # 云服务器部署脚本
+├── update.sh                  # 云服务器更新脚本
 ├── test_api.py                # 接口冒烟测试
 ├── check_db.py                # 数据库检查工具
-└── list_tables.py             # 数据库表结构查看工具
+├── list_tables.py             # 数据库表结构查看工具
+└── query_tables.py            # 数据库查询工具
 ```
 
 ## 📝 版本历史
