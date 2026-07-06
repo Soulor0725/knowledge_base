@@ -9,7 +9,7 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
 
 try {
     Register-ScheduledTask -TaskName $appName -Action $action -Trigger $trigger -Settings $settings -Force
-    Write-Host "Task created successfully!" -ForegroundColor Green
+    Write-Host "计划任务创建成功！" -ForegroundColor Green
 } catch {
-    Write-Host "Failed: $_" -ForegroundColor Red
+    Write-Host "创建失败: $_" -ForegroundColor Red
 }

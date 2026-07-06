@@ -1,64 +1,61 @@
-# Repository Guidelines
+# AGENTS.md — 智慧管理中心 (Echo) v2.5.1
 
-## Project Structure & Module Organization
+## Architecture
 
-This is a **single-file monolith** Flask web app (智慧管理中心/Echo, v2.3.0).
+**Single-file monolith Flask app**. All in `app.py` (~1476 lines): REST routes, auth, DB init, 4 domain modules. No blueprints or packages.
 
-- `app.py` — Backend entrypoint: all REST routes, auth, DB init, and domain logic (~1630 lines). No blueprints or modules.
-- `static/index.html` — Complete frontend: UI, client-side routing, and API calls (~5940 lines). Vanilla JS, no build step.
-- `static/uploads/` — User-uploaded images (gitignored).
-- `knowledge_base.db` — SQLite database (gitignored). Schema managed by `init_db()`.
-- `docs/` — Architecture diagrams, PRD, interaction design specs, Playwright setup.
-- `Test_Team/` — Manual test cases and PRD documents (gitignored).
-- `requirements.txt` — Python dependencies: `flask`, `flask-cors`, `pyjwt`, `passlib`.
+- `static/index.html` (~5676 lines) — Vanilla JS SPA, no build step. `fetch()` to `/api`, `getAuthHeaders()` for Bearer token, JWT in `localStorage.token`.
+- `knowledge_base.db` — SQLite, auto-created by `init_db()`. Runs only inside `if __name__ == '__main__'` (importing app does NOT create tables).
 
-## Build, Test, and Development Commands
+## Commands
 
 ```bash
-pip install -r requirements.txt   # Install dependencies
-python app.py                     # Start dev server on http://0.0.0.0:5001
-start.bat                         # Windows quick-start (sets UTF-8, installs deps, runs app)
-python test_api.py                # Integration smoke test (requires running server)
+pip install -r requirements.txt   # deps: flask, flask-cors, pyjwt, passlib
+python app.py                     # starts on http://0.0.0.0:5001
+start.bat                         # Windows quick-start (chcp 65001, install deps, run)
+python test_api.py                # smoke test — needs server running on localhost:5001
 ```
 
 - **Port is 5001**, not 5000.
-- **Windows PowerShell**: use `;` not `&&` to chain commands (e.g., `python app.py; if ($?) { ... }`).
-- No linter or formatter is configured. Prefer `ruff` / `flake8` / `black` if adding one.
-- CI exists: `.github/workflows/playwright.yml` for Playwright E2E tests.
+- **PowerShell**: `;` not `&&` to chain (e.g., `python app.py; if ($?) { ... }`).
+- No linter/formatter configured. Prefer `ruff` / `black` if adding one.
 
-## Coding Style & Naming Conventions
+## SQLite Rules
 
-- **Python**: 4-space indentation, PEP 8 style.
-- **Frontend**: Vanilla JS with `fetch()`. API calls use `API_URL = '/api'` and `getAuthHeaders()` for Bearer tokens.
-- **SQLite**: Raw `sqlite3` (no ORM). Placeholder is `?`, not `%s`. Rows returned as `sqlite3.Row`.
-- **Schema changes**: Do NOT edit existing `CREATE TABLE` statements in `init_db()`. Append `ALTER TABLE` blocks instead (idempotent).
-- **CSV exports**: Use GBK encoding (no BOM) for Windows Excel compatibility. Do NOT switch to plain UTF-8.
+- Placeholder is `?`, not `%s`. Rows returned as `sqlite3.Row`.
+- **Never edit existing `CREATE TABLE`** in `init_db()`. Append `ALTER TABLE ADD COLUMN` blocks (idempotent, guarded by `PRAGMA table_info`).
+- `close_db` registered via `@app.teardown_appcontext` — use `get_db()` everywhere.
+- All tables carry `user_id` FK; queries filter by `g.user_id` (enforced by `@login_required` which reads `Authorization: Bearer <token>`, 7‑day JWT expiry).
 
-## Testing Guidelines
+## CSV Exports
 
-- `test_api.py` is an integration smoke test. Start the server at `localhost:5001` before running it.
-- No pytest suite exists. If adding tests, use `python -m pytest path/to/test_file.py::test_name`.
-- Helper scripts (`check_db.py`, `list_tables.py`, `query_tables.py`) are for manual DB inspection — run from repo root.
-- CI: `.github/workflows/playwright.yml` runs Playwright E2E tests on push/PR.
+**GBK encoding** (UTF‑8 BOM) for Windows Excel compatibility. Content-Type `text/csv; charset=gbk`. Do NOT switch to plain UTF-8.
 
-## Commit & Pull Request Guidelines
+## Domain API Prefixes
 
-Commit messages follow two patterns:
+| Module | Routes |
+|--------|--------|
+| Auth | `/api/auth/*` |
+| Articles | `/api/articles/*`, `/api/categories/*`, `/api/tags`, `/api/stats` |
+| Kiwi sales | `/api/kiwi-sales/*`, `/api/kiwi-sales/export` |
+| Overtime | `/api/overtime/*`, `/api/overtime/stats` |
+| Expenses | `/api/expenses/*`, `/api/expenses/stats`, `/api/expenses/export` |
+| Upload | `/api/upload` (→ `static/uploads/`, 16 MB limit, `werkzeug.utils.secure_filename`) |
 
-- **Version bumps**: `v2.2.0: UI全面美化、工作日报文案适配、数据库连接泄漏修复`
-- **Imperative**: `Bump version to v2.2.1`, `Remove CODEBUDDY.md from repo and ignore it`
+## Overtime Rules (domain-specific)
 
-When submitting PRs:
+- **Weekday**: start 19:00, end 19:00‑23:59.
+- **Weekend**: 09:00‑23:00, auto‑deduct 12:00‑14:00 (2 h lunch). Same‑day unique.
+- Monthly stats use **20th‑to‑20th** period (e.g., July = June 20 → July 20).
 
-- Include a description of changes and affected modules.
-- Update `VERSION.md` for user-facing changes.
-- Back up `knowledge_base.db` before schema-altering changes.
+## Gotchas
 
-## Architecture Notes
+- `SECRET_KEY` = `os.environ.get('SECRET_KEY') or os.urandom(32).hex()`. No hardcoded default. Set env var for production.
+- Default categories seeded (`技术`, `生活`, `学习`, `工作`) only when DB empty.
+- `auto_start.bat` and `setup_autostart.ps1` contain stale hardcoded paths — update before use.
+- `test_*.py` scripts (`test_api.py`, `check_js.py`, `test_sql.py`) are **gitignored** — won't appear in repo.
+- CI: `.github/workflows/playwright.yml` runs Playwright E2E on push/PR to `main`.
 
-- **Auth**: JWT tokens (7-day expiry) via `pyjwt`. The `@login_required` decorator reads `Authorization: Bearer <token>` and sets `g.user_id`. All data queries filter by `g.user_id`.
-- **Overtime rules**: Weekday starts from 19:00; weekend 09:00–23:00 with 2-hour lunch deduction. Same-day uniqueness enforced. Monthly stats use 20th-to-20th period (e.g., July = June 20 – July 20).
-- **Secret handling**: `SECRET_KEY` is read from `os.environ` with random fallback. Do not hardcode.
-- **File uploads**: Saved to `static/uploads/`, sanitized via `werkzeug.utils.secure_filename`. Allowed: png, jpg, jpeg, gif, webp. 16MB limit.
-- **DB connection lifecycle**: `close_db` registered via `@app.teardown_appcontext`. Do not manually open/close connections outside `get_db()`.
-- **Domain modules** (all in `app.py`): Auth, Articles/Knowledge base, Kiwi sales, Overtime, Expenses, Upload.
+## Commit & Versioning
+
+- For user-facing changes, update `VERSION.md` and back up `knowledge_base.db` before schema-altering changes.

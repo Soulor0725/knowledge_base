@@ -7,6 +7,7 @@ from flask_cors import CORS
 import sqlite3
 from datetime import datetime, timedelta, timezone
 import os
+import re
 from werkzeug.utils import secure_filename
 import jwt
 from passlib.hash import pbkdf2_sha256
@@ -34,6 +35,11 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+def sanitize_csv_field(value):
+    if value and isinstance(value, str) and value and value[0] in ('=', '+', '-', '@'):
+        return "'" + value
+    return value
 
 def get_db():
     """获取数据库连接"""
@@ -216,7 +222,7 @@ def register():
     """用户注册"""
     data = request.get_json()
     if not data:
-        return jsonify({'error': '请求数据不能为空'}), 400
+        return jsonify({'error': '请提供用户名、密码和中文名'}), 400
     username = (data.get('username') or '').strip()
     password = data.get('password')
     name = (data.get('name') or '').strip()
@@ -225,7 +231,9 @@ def register():
         return jsonify({'error': '用户名和密码不能为空'}), 400
     
     if len(username) < 3 or len(password) < 6:
-        return jsonify({'error': '用户名至少3个字符，密码至少6个字符'}), 400
+        return jsonify({'error': '用户名至少3个字符，密码至少6个字符，且需包含字母和数字'}), 400
+    if not re.search(r'[A-Za-z]', password) or not re.search(r'\d', password):
+        return jsonify({'error': '密码必须同时包含字母和数字'}), 400
     
     db = get_db()
     cursor = db.cursor()
@@ -246,7 +254,7 @@ def login():
     """用户登录"""
     data = request.get_json()
     if not data:
-        return jsonify({'error': '请求数据不能为空'}), 400
+        return jsonify({'error': '请提供用户名和密码'}), 400
     username = (data.get('username') or '').strip()
     password = data.get('password')
     
@@ -299,67 +307,73 @@ def get_current_user():
             user = cursor.fetchone()
             return jsonify(dict(user))
         except Exception as e:
-            return jsonify({'error': str(e)}), 500
+            return jsonify({'error': '更新用户信息失败'}), 500
 
 @app.route('/api/articles', methods=['GET'])
 @login_required
 def get_articles():
-    # 直接创建新的数据库连接，确保获取最新数据
-    conn = sqlite3.connect(DATABASE)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    try:
-        category = request.args.get('category')
-        tag = request.args.get('tag')
-        search = request.args.get('search')
-        favorite = request.args.get('favorite')
-        page = request.args.get('page', 1, type=int)
-        page_size = request.args.get('page_size', 5, type=int)
+    db = get_db()
+    cursor = db.cursor()
+    category = request.args.get('category')
+    tag = request.args.get('tag')
+    search = request.args.get('search')
+    favorite = request.args.get('favorite')
+    page = request.args.get('page', 1, type=int)
+    page_size = request.args.get('page_size', 5, type=int)
 
-        # 构建基础查询
-        base_query = 'SELECT * FROM articles WHERE user_id = ?'
-        count_query = 'SELECT COUNT(*) FROM articles WHERE user_id = ?'
-        params = [g.user_id]
+    base_query = 'SELECT * FROM articles WHERE user_id = ?'
+    count_query = 'SELECT COUNT(*) FROM articles WHERE user_id = ?'
+    params = [g.user_id]
 
-        # 添加过滤条件
-        if category:
-            base_query += ' AND category = ?'
-            count_query += ' AND category = ?'
-            params.append(category)
-        if tag:
-            base_query += ' AND tags LIKE ?'
-            count_query += ' AND tags LIKE ?'
-            params.append(f'%{tag}%')
-        if search:
-            base_query += ' AND (title LIKE ? OR content LIKE ?)'
-            count_query += ' AND (title LIKE ? OR content LIKE ?)'
-            params.extend([f'%{search}%', f'%{search}%'])
-        if favorite == 'true':
-            base_query += ' AND is_favorite = 1'
-            count_query += ' AND is_favorite = 1'
+    if category:
+        base_query += ' AND category = ?'
+        count_query += ' AND category = ?'
+        params.append(category)
+    if tag:
+        base_query += ' AND tags LIKE ?'
+        count_query += ' AND tags LIKE ?'
+        params.append(f'%{tag}%')
+    if search:
+        base_query += ' AND (title LIKE ? OR content LIKE ?)'
+        count_query += ' AND (title LIKE ? OR content LIKE ?)'
+        params.extend([f'%{search}%', f'%{search}%'])
+    if favorite == 'true':
+        base_query += ' AND is_favorite = 1'
+        count_query += ' AND is_favorite = 1'
 
-        # 计算总数
-        cursor.execute(count_query, params)
-        total = cursor.fetchone()[0]
+    cursor.execute(count_query, params)
+    total = cursor.fetchone()[0]
 
-        # 添加分页和排序
-        offset = (page - 1) * page_size
-        base_query += ' ORDER BY updated_at DESC LIMIT ? OFFSET ?'
-        params.extend([page_size, offset])
+    offset = (page - 1) * page_size
+    base_query += ' ORDER BY updated_at DESC LIMIT ? OFFSET ?'
+    params.extend([page_size, offset])
 
-        # 执行查询
-        cursor.execute(base_query, params)
-        articles = [dict(row) for row in cursor.fetchall()]
+    cursor.execute(base_query, params)
+    articles = [dict(row) for row in cursor.fetchall()]
 
-        # 返回结果
-        return jsonify({
-            'articles': articles,
-            'total': total,
-            'page': page,
-            'page_size': page_size
-        })
-    finally:
-        conn.close()
+    return jsonify({
+        'articles': articles,
+        'total': total,
+        'page': page,
+        'page_size': page_size
+    })
+
+@app.route('/api/articles/batch-delete', methods=['POST'])
+@login_required
+def batch_delete_articles():
+    data = request.get_json()
+    ids = data.get('ids', [])
+    if not ids or not isinstance(ids, list):
+        return jsonify({'error': '请提供要删除的文章ID列表'}), 400
+    if len(ids) > 100:
+        return jsonify({'error': '单次删除不能超过100篇文章'}), 400
+    db = get_db()
+    cursor = db.cursor()
+    placeholders = ','.join(['?'] * len(ids))
+    cursor.execute(f'DELETE FROM articles WHERE id IN ({placeholders}) AND user_id=?', ids + [g.user_id])
+    deleted = cursor.rowcount
+    db.commit()
+    return jsonify({'message': f'成功删除 {deleted} 条记录', 'deleted': deleted})
 
 @app.route('/api/articles/navigate', methods=['GET'])
 @login_required
@@ -367,73 +381,31 @@ def get_navigate_article():
     current_id = request.args.get('current_id', type=int)
     direction = request.args.get('direction', 'next')
     
-    print(f"=== 导航请求 ===")
-    print(f"当前ID: {current_id}")
-    print(f"方向: {direction}")
-    
     if not current_id:
-        print("缺少参数")
         return jsonify({'error': '缺少参数'}), 400
     
-    # 获取当前用户ID
     user_id = g.user_id
-    print(f"用户ID: {user_id}")
     
     try:
         db = get_db()
         cursor = db.cursor()
         
-        # 先查询所有文章的ID，看看有哪些文章
-        cursor.execute('SELECT id FROM articles WHERE user_id = ? ORDER BY id ASC', (user_id,))
-        all_ids = [row[0] for row in cursor.fetchall()]
-        print(f"所有文章ID: {all_ids}")
-        
         if direction == 'prev':
-            # 上一篇：找到比当前ID小的最大ID
-            query = '''
-                SELECT * FROM articles 
-                WHERE id < ? AND user_id = ? 
-                ORDER BY id DESC 
-                LIMIT 1
-            '''
-            print("查询上一篇文章")
+            query = 'SELECT * FROM articles WHERE id < ? AND user_id = ? ORDER BY id DESC LIMIT 1'
         else:
-            # 下一篇：找到比当前ID大的最小ID
-            query = '''
-                SELECT * FROM articles 
-                WHERE id > ? AND user_id = ? 
-                ORDER BY id ASC 
-                LIMIT 1
-            '''
-            print("查询下一篇文章")
+            query = 'SELECT * FROM articles WHERE id > ? AND user_id = ? ORDER BY id ASC LIMIT 1'
         
         cursor.execute(query, (current_id, user_id))
         article = cursor.fetchone()
         
         if article:
-            # 转换为字典
-            article_dict = {
-                'id': article[0],
-                'title': article[1],
-                'content': article[2],
-                'category': article[3],
-                'tags': article[4],
-                'created_at': article[5],
-                'updated_at': article[6],
-                'is_draft': article[9],
-                'is_favorite': article[8],
-                'is_top': 0,  # 表中没有is_top列，默认为0
-                'views': article[7],
-                'user_id': article[10]
-            }
-            print(f"找到文章: {article_dict['id']} - {article_dict['title']}")
+            article_dict = dict(article)
+            article_dict['is_top'] = 0
             return jsonify({'article': article_dict})
         else:
-            print("没有找到文章")
-            return jsonify({'article': None})
+            return jsonify({'error': '没有更多文章'}), 404
     except Exception as e:
-        print(f"错误: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': '获取导航文章失败'}), 500
 
 @app.route('/api/articles/<int:article_id>', methods=['GET'])
 @login_required
@@ -458,8 +430,11 @@ def create_article():
     tags = data.get('tags', '')
     is_draft = data.get('is_draft', 0)
 
-    if not is_draft and (not title or not content):
-        return jsonify({'error': '标题和内容不能为空'}), 400
+    if not is_draft:
+        if not title:
+            return jsonify({'error': '标题不能为空'}), 400
+        if not content:
+            return jsonify({'error': '内容不能为空'}), 400
 
     db = get_db()
     cursor = db.cursor()
@@ -528,7 +503,7 @@ def toggle_favorite(article_id):
     cursor.execute('UPDATE articles SET is_favorite = NOT is_favorite WHERE id = ? AND user_id = ?', (article_id, g.user_id))
     if cursor.rowcount == 0:
         return jsonify({'error': '文章不存在'}), 404
-    cursor.execute('SELECT is_favorite FROM articles WHERE id = ?', (article_id,))
+    cursor.execute('SELECT is_favorite FROM articles WHERE id = ? AND user_id = ?', (article_id, g.user_id))
     is_favorite = cursor.fetchone()[0]
     db.commit()
     return jsonify({'is_favorite': bool(is_favorite)})
@@ -558,7 +533,6 @@ def create_category():
         return jsonify({'error': '分类名称不能为空'}), 400
     if len(name) > 50:
         return jsonify({'error': '分类名称不能超过50个字符'}), 400
-    import re
     if re.search(r'[<>"\'&]', name):
         return jsonify({'error': '分类名称不能包含特殊字符'}), 400
     db = get_db()
@@ -724,11 +698,9 @@ def get_kiwi_sales():
 def add_kiwi_sale():
     data = request.get_json()
     
-    # 后端验证
     if not data:
-        return jsonify({'error': '请求数据不能为空'}), 400
+        return jsonify({'error': '请提供订单信息（客户名、电话、地址、接单日期等）'}), 400
     
-    # 客户名校验
     customer_name = data.get('customer_name', '').strip()
     if not customer_name:
         return jsonify({'error': '客户名不能为空'}), 400
@@ -771,7 +743,7 @@ def add_kiwi_sale():
 
     # 数量校验
     quantity = data.get('quantity', 0)
-    if quantity and (not isinstance(quantity, int) or quantity < 0):
+    if not isinstance(quantity, int) or quantity < 0:
         return jsonify({'error': '数量必须是正整数'}), 400
 
     # 支付金额校验
@@ -806,11 +778,9 @@ def add_kiwi_sale():
 def update_kiwi_sale(sale_id):
     data = request.get_json()
     
-    # 后端验证
     if not data:
-        return jsonify({'error': '请求数据不能为空'}), 400
+        return jsonify({'error': '请提供订单信息（客户名、电话、地址、接单日期等）'}), 400
     
-    # 客户名校验
     customer_name = data.get('customer_name', '').strip()
     if not customer_name:
         return jsonify({'error': '客户名不能为空'}), 400
@@ -853,7 +823,7 @@ def update_kiwi_sale(sale_id):
 
     # 数量校验
     quantity = data.get('quantity', 0)
-    if quantity and (not isinstance(quantity, int) or quantity < 0):
+    if not isinstance(quantity, int) or quantity < 0:
         return jsonify({'error': '数量必须是正整数'}), 400
 
     # 支付金额校验
@@ -981,18 +951,21 @@ def get_kiwi_sales_report():
         GROUP BY remark
     ''', (g.user_id,) + tuple(year_params))
     summary_rows = cursor.fetchall()
-    summary = {'5斤装': {'quantity': 0, 'amount': 0}, '10斤装': {'quantity': 0, 'amount': 0}}
+    summary = {}
     total_quantity = 0
     total_amount = 0
     for row in summary_rows:
-        remark = row['remark'] or ''
+        remark = row['remark'] or '其他'
         qty = row['total_quantity'] or 0
         amt = row['total_amount'] or 0
         total_quantity += qty
         total_amount += amt
-        if remark in summary:
-            summary[remark]['quantity'] = qty
-            summary[remark]['amount'] = amt
+        if remark not in summary:
+            summary[remark] = {'quantity': 0, 'amount': 0}
+        summary[remark]['quantity'] += qty
+        summary[remark]['amount'] += amt
+
+    summary_output = {k: {'quantity': v['quantity'], 'amount': round(v['amount'], 2)} for k, v in summary.items()}
 
     return jsonify({
         'report': report_data,
@@ -1001,8 +974,7 @@ def get_kiwi_sales_report():
         'total_customers': total_customers,
         'total_pages': total_pages,
         'summary': {
-            '5斤装': {'quantity': summary['5斤装']['quantity'], 'amount': round(summary['5斤装']['amount'], 2)},
-            '10斤装': {'quantity': summary['10斤装']['quantity'], 'amount': round(summary['10斤装']['amount'], 2)},
+            **summary_output,
             'total_quantity': total_quantity,
             'total_amount': round(total_amount, 2)
         }
@@ -1011,18 +983,17 @@ def get_kiwi_sales_report():
 # 加班记录 - 计算时长
 def calculate_overtime_duration(overtime_type, start_time, end_time):
     """根据加班类型和时间计算加班时长"""
-    from datetime import datetime as dt
-    end = dt.strptime(end_time, '%H:%M')
+    end = datetime.strptime(end_time, '%H:%M')
     if overtime_type == 'weekday':
         # 平时加班统一从19:00开始计算，无论用户输入的开始时间
-        start = dt.strptime('19:00', '%H:%M')
+        start = datetime.strptime('19:00', '%H:%M')
     else:
-        start = dt.strptime(start_time, '%H:%M')
+        start = datetime.strptime(start_time, '%H:%M')
     diff_minutes = (end - start).seconds // 60
     if overtime_type == 'weekend':
         # 周末加班自动扣除12:00-14:00午餐时间（2小时=120分钟）
-        lunch_start = dt.strptime('12:00', '%H:%M')
-        lunch_end = dt.strptime('14:00', '%H:%M')
+        lunch_start = datetime.strptime('12:00', '%H:%M')
+        lunch_end = datetime.strptime('14:00', '%H:%M')
         if start < lunch_end and end > lunch_start:
             overlap_start = max(start, lunch_start)
             overlap_end = min(end, lunch_end)
@@ -1077,17 +1048,15 @@ def add_overtime_record():
     remark = data.get('remark', '').strip()
 
     if overtime_type not in ['weekday', 'weekend']:
-        return jsonify({'error': '加班类型必须是 weekday 或 weekend'}), 400
+        return jsonify({'error': '加班类型必须是 平时加班 或 周末加班'}), 400
     if not date:
         return jsonify({'error': '日期不能为空'}), 400
     if not start_time or not end_time:
         return jsonify({'error': '开始时间和结束时间不能为空'}), 400
 
-    # 校验时间格式
-    from datetime import datetime as dt
     try:
-        dt.strptime(start_time, '%H:%M')
-        dt.strptime(end_time, '%H:%M')
+        datetime.strptime(start_time, '%H:%M')
+        datetime.strptime(end_time, '%H:%M')
     except ValueError:
         return jsonify({'error': '时间格式错误，请使用 HH:MM 格式'}), 400
 
@@ -1140,16 +1109,15 @@ def update_overtime_record(record_id):
     remark = data.get('remark', '').strip()
 
     if overtime_type not in ['weekday', 'weekend']:
-        return jsonify({'error': '加班类型必须是 weekday 或 weekend'}), 400
+        return jsonify({'error': '加班类型必须是 平时加班 或 周末加班'}), 400
     if not date:
         return jsonify({'error': '日期不能为空'}), 400
     if not start_time or not end_time:
         return jsonify({'error': '开始时间和结束时间不能为空'}), 400
 
-    from datetime import datetime as dt
     try:
-        dt.strptime(start_time, '%H:%M')
-        dt.strptime(end_time, '%H:%M')
+        datetime.strptime(start_time, '%H:%M')
+        datetime.strptime(end_time, '%H:%M')
     except ValueError:
         return jsonify({'error': '时间格式错误，请使用 HH:MM 格式'}), 400
 
@@ -1251,7 +1219,7 @@ def get_overtime_stats():
         'total_count': total_count
     })
 
-# 加班月度统计（按上月20日到本月20日周期）
+# 加班月度统计（按上月21日到本月20日周期）
 @app.route('/api/overtime/stats/monthly', methods=['GET'])
 @login_required
 def get_overtime_monthly_stats():
@@ -1259,35 +1227,34 @@ def get_overtime_monthly_stats():
     if not month:
         return jsonify({'error': '请提供month参数 (YYYY-MM)'}), 400
 
-    from datetime import datetime as dt
     try:
-        target = dt.strptime(month, '%Y-%m')
+        target = datetime.strptime(month, '%Y-%m')
     except ValueError:
         return jsonify({'error': '月份格式错误，请使用 YYYY-MM'}), 400
 
-    # 统计周期：上月20日 到 本月20日
+    # 统计周期：上月21日 到 本月20日（含）
     period_start_month = target.month - 1 if target.month > 1 else 12
     period_start_year = target.year if target.month > 1 else target.year - 1
-    period_start = f"{period_start_year}-{period_start_month:02d}-20"
+    period_start = f"{period_start_year}-{period_start_month:02d}-21"
     period_end = f"{target.year}-{target.month:02d}-20"
 
     db = get_db()
     cursor = db.cursor()
 
     cursor.execute(
-        "SELECT SUM(duration) FROM overtime_records WHERE user_id = ? AND overtime_type = 'weekday' AND date >= ? AND date < ?",
+        "SELECT SUM(duration) FROM overtime_records WHERE user_id = ? AND overtime_type = 'weekday' AND date >= ? AND date <= ?",
         (g.user_id, period_start, period_end)
     )
     weekday_total = cursor.fetchone()[0] or 0
 
     cursor.execute(
-        "SELECT SUM(duration) FROM overtime_records WHERE user_id = ? AND overtime_type = 'weekend' AND date >= ? AND date < ?",
+        "SELECT SUM(duration) FROM overtime_records WHERE user_id = ? AND overtime_type = 'weekend' AND date >= ? AND date <= ?",
         (g.user_id, period_start, period_end)
     )
     weekend_total = cursor.fetchone()[0] or 0
 
     cursor.execute(
-        "SELECT COUNT(*) FROM overtime_records WHERE user_id = ? AND date >= ? AND date < ?",
+        "SELECT COUNT(*) FROM overtime_records WHERE user_id = ? AND date >= ? AND date <= ?",
         (g.user_id, period_start, period_end)
     )
     total_count = cursor.fetchone()[0]
@@ -1393,7 +1360,7 @@ def export_expenses():
         response.headers['Content-Disposition'] = f"attachment; filename=\"{safe_filename}\""
         return response
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': '导出消费记录失败'}), 500
 
 # 猕猴桃销售订单导出
 @app.route('/api/kiwi-sales/export', methods=['GET'])
@@ -1461,7 +1428,7 @@ def export_kiwi_sales():
         response.headers['Content-Disposition'] = f"attachment; filename=\"{safe_filename}\""
         return response
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': '导出猕猴桃销售记录失败'}), 500
 
 @app.route('/api/expenses', methods=['POST'])
 @login_required

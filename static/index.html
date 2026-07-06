@@ -1910,13 +1910,13 @@
                     const displayName = user.name || user.username;
                     let avatarHtml = '';
                     if (user.avatar) {
-                        avatarHtml = `<div class="user-avatar" style="width: 44px; height: 44px; border-radius: 50%; background: url(${user.avatar}) no-repeat center center / cover; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;"></div>`;
+                        avatarHtml = `<div class="user-avatar" style="width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; overflow: hidden;"><img src="${escapeHtml(user.avatar)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none';this.parentElement.textContent='${escapeHtml(displayName.charAt(0).toUpperCase())}'"></div>`;
                     } else {
-                        avatarHtml = `<div class="user-avatar">${displayName.charAt(0).toUpperCase()}</div>`;
+                        avatarHtml = `<div class="user-avatar">${escapeHtml(displayName.charAt(0).toUpperCase())}</div>`;
                     }
                     document.getElementById('userInfo').innerHTML = `
                         ${avatarHtml}
-                        <span class="user-name">${displayName}</span>
+                        <span class="user-name">${escapeHtml(displayName)}</span>
                         <button class="btn btn-secondary" onclick="openProfileModal()">编辑资料</button>
                         <button class="btn btn-secondary" onclick="logout()">退出</button>
                     `;
@@ -1994,10 +1994,8 @@
             const username = document.getElementById('loginUsername').value.trim();
             const password = document.getElementById('loginPassword').value;
 
-            if (!username || !password) {
-                alert('请输入用户名和密码');
-                return;
-            }
+            if (!username) { alert('请输入用户名'); return; }
+            if (!password) { alert('请输入密码'); return; }
 
             try {
                 const response = await fetch(`${API_URL}/auth/login`, {
@@ -2030,15 +2028,10 @@
             const password = document.getElementById('registerPassword').value;
             const name = document.getElementById('registerName').value.trim();
 
-            if (!username || !password) {
-                alert('请输入用户名和密码');
-                return;
-            }
-
-            if (username.length < 3 || password.length < 6) {
-                alert('用户名至少3个字符，密码至少6个字符');
-                return;
-            }
+            if (!username) { alert('请输入用户名'); return; }
+            if (!password) { alert('请输入密码'); return; }
+            if (username.length < 3) { alert('用户名至少3个字符'); return; }
+            if (password.length < 6) { alert('密码至少6个字符'); return; }
 
             try {
                 const response = await fetch(`${API_URL}/auth/register`, {
@@ -2121,15 +2114,19 @@
                 try {
                     // 这里可以添加头像上传逻辑，暂时使用base64
                     const reader = new FileReader();
-                    await new Promise((resolve) => {
+                    await new Promise((resolve, reject) => {
                         reader.onload = function(e) {
                             // 限制base64大小，避免请求体过大
                             const base64 = e.target.result;
                             if (base64.length > 1024 * 1024) { // 1MB
-                                throw new Error('头像文件太大，请选择小于1MB的图片');
+                                reject(new Error('头像文件太大，请选择小于1MB的图片'));
+                                return;
                             }
                             avatar = base64;
                             resolve();
+                        };
+                        reader.onerror = function() {
+                            reject(new Error('读取头像文件失败'));
                         };
                         reader.readAsDataURL(avatarFile);
                     });
@@ -2367,7 +2364,7 @@
                 const result = await response.json();
                 console.log('API响应:', result);
                 if (!result || !Array.isArray(result.articles)) {
-                    throw new Error('API响应格式错误');
+                    throw new Error('接口响应格式错误');
                 }
                 const articles = result.articles;
                 totalArticles = result.total || 0;
@@ -2553,108 +2550,6 @@
             summary = summary.replace(/\n/g, ' '); // 换行符
             // 截取前200个字符
             return summary.length > 200 ? summary.substring(0, 200) + '...' : summary;
-        }
-
-        async function viewArticle(id) {
-            try {
-                const response = await fetch(`${API_URL}/articles/${id}`, { headers: getAuthHeaders() });
-                const article = await response.json();
-                
-                // 配置Marked.js
-                marked.setOptions({
-                    breaks: true,
-                    gfm: true,
-                    highlight: function(code, lang) {
-                        // 简单的语法高亮
-                        if (!lang) return code;
-                        
-                        // 针对不同语言的高亮
-                        if (lang === 'python') {
-                            code = code
-                                // 关键字
-                                .replace(/\b(def|class|import|from|if|elif|else|for|while|try|except|finally|return|print|pass|break|continue|with|as|lambda|and|or|not|in|is|True|False|None)\b/g, '<span style="color: #0000ff;">$1</span>')
-                                // 字符串
-                                .replace(/(['"])(?:\\.|[^\\])*?\1/g, '<span style="color: #008000;">$&</span>')
-                                // 注释
-                                .replace(/#.*$/gm, '<span style="color: #808080; font-style: italic;">$&</span>')
-                                // 数字
-                                .replace(/\b\d+\b/g, '<span style="color: #ff8c00;">$&</span>')
-                                // 函数名
-                                .replace(/\bdef\s+(\w+)/g, 'def <span style="color: #000000;">$1</span>')
-                                // 类名
-                                .replace(/\bclass\s+(\w+)/g, 'class <span style="color: #000000;">$1</span>')
-                                // 运算符
-                                .replace(/([=+\-*/%&|^!<>=])/g, '<span style="color: #ff8c00;">$1</span>');
-                        } else if (lang === 'javascript' || lang === 'js') {
-                            code = code
-                                // 关键字
-                                .replace(/\b(var|let|const|function|if|else|for|while|do|switch|case|default|break|continue|return|try|catch|finally|throw|new|this|typeof|instanceof|in|of|from|import|export|async|await)\b/g, '<span style="color: #0000ff;">$1</span>')
-                                // 字符串
-                                .replace(/(['"])(?:\\.|[^\\])*?\1/g, '<span style="color: #008000;">$&</span>')
-                                // 注释
-                                .replace(/\/\/.*$/gm, '<span style="color: #808080; font-style: italic;">$&</span>')
-                                .replace(/\/\*[\s\S]*?\*\//g, '<span style="color: #808080; font-style: italic;">$&</span>')
-                                // 数字
-                                .replace(/\b\d+\b/g, '<span style="color: #ff8c00;">$&</span>')
-                                // 函数名
-                                .replace(/\bfunction\s+(\w+)/g, 'function <span style="color: #000000;">$1</span>')
-                                // 方法调用
-                                .replace(/(\w+)\s*\(/g, '<span style="color: #000000;">$1</span>(')
-                                // 运算符
-                                .replace(/([=+\-*/%&|^!<>=])/g, '<span style="color: #ff8c00;">$1</span>');
-                        } else if (lang === 'html') {
-                            code = code
-                                // 标签
-                                .replace(/<(\w+)/g, '<span style="color: #0000ff;">&lt;$1</span>')
-                                .replace(/<\/(\w+)>/g, '<span style="color: #0000ff;">&lt;/$1&gt;</span>')
-                                // 属性
-                                .replace(/(\w+)\s*=/g, '<span style="color: #000000;">$1</span>=')
-                                // 属性值
-                                .replace(/=(['"])(?:\\.|[^\\])*?\1/g, '=<span style="color: #008000;">$&</span>')
-                                // 注释
-                                .replace(/<!--[\s\S]*?-->/g, '<span style="color: #64748b; font-style: italic;">$&</span>');
-                        } else if (lang === 'css') {
-                            code = code
-                                // 选择器
-                                .replace(/([.#]?[\w-]+)\s*\{/g, '<span style="color: #0000ff;">$1</span>{')
-                                // 属性
-                                .replace(/(\w+)\s*:/g, '<span style="color: #000000;">$1</span>:')
-                                // 值
-                                .replace(/:\s*([^;]+);/g, ': <span style="color: #008000;">$1</span>;')
-                                // 注释
-                                .replace(/\/\*[\s\S]*?\*\//g, '<span style="color: #808080; font-style: italic;">$&</span>');
-                        }
-                        
-                        return code;
-                    },
-                    langPrefix: 'language-'
-                });
-                
-                document.getElementById('articleList').innerHTML = `
-                    <div style="background: rgba(30, 41, 59, 0.6); border: 1px solid rgba(148, 163, 184, 0.1); border-radius:20px;padding:36px;backdrop-filter: blur(10px);">
-                        <button class="btn btn-secondary" onclick="loadArticles(); loadStats();" style="margin-bottom:24px;">← 返回列表</button>
-                        <h1 style="font-size:32px;margin-bottom:18px;color:#f8fafc;">${escapeHtml(article.title)}</h1>
-                        <div class="article-meta" style="margin-bottom:24px;">
-                            <span class="article-category" style="background:${getCategoryColor(article.category)};padding:4px 12px;border-radius:12px;font-size:12px;margin-right:12px;">${article.category}</span>
-                            <span style="color:#94a3b8;font-size:14px;margin-right:16px;">${formatDate(article.updated_at)}</span>
-                            <span style="color:#94a3b8;font-size:14px;"><i class="fa fa-eye"></i> ${article.views}</span>
-                        </div>
-                        <div style="color:#cbd5e1;line-height:1.9;margin-bottom:36px;">
-                            ${marked(article.content)}
-                        </div>
-                        <div style="display:flex;justify-content:space-between;align-items:center;">
-                            <div style="display:flex;gap:12px;">
-                                <button class="btn btn-secondary" onclick="editArticle(${id})"><i class="fa fa-pencil"></i> 编辑</button>
-                                <button class="btn btn-secondary" onclick="toggleFavorite(${id}, event)"><i class="fa ${article.is_favorite ? 'fa-star' : 'fa-star-o'}"></i> ${article.is_favorite ? '取消收藏' : '收藏'}</button>
-                            </div>
-                            <div style="display:flex;gap:12px;">
-                                <button class="btn btn-secondary" onclick="navigateArticle(${id}, 'prev')"><i class="fa fa-arrow-left"></i> 上一篇</button>
-                                <button class="btn btn-secondary" onclick="navigateArticle(${id}, 'next')">下一篇 <i class="fa fa-arrow-right"></i></button>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            } catch (error) { console.error('加载文章详情失败:', error); }
         }
 
         // 文章导航函数
@@ -4564,7 +4459,8 @@
                 data.duration = parsed;
             }
             if (!data.date) { alert('请选择日期'); return; }
-            if (!data.start_time || !data.end_time) { alert('请填写开始和结束时间'); return; }
+            if (!data.start_time) { alert('请填写开始时间'); return; }
+            if (!data.end_time) { alert('请填写结束时间'); return; }
             try {
                 const url = id ? `${API_URL}/overtime/${id}` : `${API_URL}/overtime`;
                 const method = id ? 'PUT' : 'POST';
@@ -5320,7 +5216,11 @@
 
         function closeModal(modalId) { 
             if (modalId) {
-                document.getElementById(modalId).style.display = 'none';
+                const el = document.getElementById(modalId);
+                if (el) {
+                    el.classList.remove('active');
+                    el.style.display = 'none';
+                }
             } else {
                 document.getElementById('articleModal').classList.remove('active'); 
                 editingId = null; 
@@ -5364,9 +5264,12 @@
                 const id = idElement ? idElement.value : '';
                 console.log('Article ID:', id);
                 
-                // 检查标题是否为空
                 if (!article.title) {
                     alert('请输入' + articleTerm(article.category) + '标题');
+                    return;
+                }
+                if (!article.content) {
+                    alert('请填写内容');
                     return;
                 }
                 
@@ -5385,11 +5288,9 @@
                 console.log('Response ok:', response.ok);
                 
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    throw new Error(`请求失败，状态码: ${response.status}`);
                 }
                 
-                // 处理成功
-                console.log('Save successful');
                 closeModal();
                 if (easyMDE) easyMDE.toTextArea();
                 easyMDE = null;
@@ -5397,7 +5298,6 @@
                 loadCategories();
                 loadStats();
                 
-                // 添加成功提示
                 alert(id ? articleTerm(article.category) + '更新成功！' : articleTerm(article.category) + '保存成功！');
             } catch (error) {
                 console.error('保存文章失败:', error);
@@ -5460,20 +5360,14 @@
                 console.log('Response ok:', response.ok);
                 
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    throw new Error(`请求失败，状态码: ${response.status}`);
                 }
                 
-                // 处理成功
-                console.log('Draft saved successfully');
-                console.log('Calling loadArticles...');
                 alert('草稿保存成功！');
                 
-                // 关闭模态框
                 closeModal();
                 
-                // 刷新文章列表
                 loadArticles();
-                console.log('loadArticles called');
             } catch (error) {
                 console.error('保存草稿失败:', error);
                 alert('保存草稿失败，请稍后重试');
@@ -5556,19 +5450,17 @@
             }
             
             try {
-                // 逐个删除文章
-                let successCount = 0;
-                for (const id of articleIds) {
-                    const response = await fetch(`${API_URL}/articles/${id}`, {
-                        method: 'DELETE',
-                        headers: getAuthHeaders()
-                    });
-                    if (response.ok) {
-                        successCount++;
-                    }
-                }
+                const response = await fetch(`${API_URL}/articles/batch-delete`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    body: JSON.stringify({ ids: articleIds })
+                });
+                const result = await response.json();
                 
-                if (successCount > 0) {
+                if (response.ok) {
                     loadArticles();
                     loadCategories();
                     loadStats();
@@ -5580,14 +5472,13 @@
                     checkboxes.forEach(cb => cb.checked = false);
                     updateSelectedCount();
                     
-                    alert(`成功删除 ${successCount} 篇${articleTerm(currentCategory)}！`);
+                    alert(`成功删除 ${result.deleted} 篇${articleTerm(currentCategory)}！`);
                 } else {
-                    throw new Error('删除文章失败');
+                    throw new Error(result.error || '删除文章失败');
                 }
             } catch (error) {
                 console.error('删除文章失败:', error);
                 alert('删除失败，请稍后重试');
-                // 可能是未登录，重新检查认证状态
                 checkAuth();
             }
         }
@@ -5676,8 +5567,10 @@
 
         async function saveCategory(event) {
             event.preventDefault();
+            const name = document.getElementById('categoryName').value.trim();
+            if (!name) { alert('请输入分类名称'); return; }
             const category = {
-                name: document.getElementById('categoryName').value.trim(),
+                name: name,
                 color: document.getElementById('categoryColor').value
             };
             try {
@@ -5780,7 +5673,7 @@
             openModal(id);
         }
 
-        // 修复后的viewArticle函数
+        // viewArticle函数
         function viewArticle(id) {
             console.log('=== viewArticle function called ===');
             console.log('Article ID:', id);
@@ -5796,7 +5689,7 @@
                 };
                 script.onerror = function() {
                     console.error('Failed to load Marked.js');
-                    document.getElementById('articleList').innerHTML = '<div style="text-align: center; padding: 40px; color: red;">Error: Marked.js failed to load</div>';
+                    document.getElementById('articleList').innerHTML = '<div style="text-align: center; padding: 40px; color: red;">加载 Markdown 解析器失败</div>';
                 };
                 document.head.appendChild(script);
             } else {
@@ -5826,7 +5719,7 @@
                 .then(response => {
                     console.log('Response status:', response.status);
                     if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
+                        throw new Error(`请求失败，状态码: ${response.status}`);
                     }
                     return response.json();
                 })
@@ -5849,7 +5742,7 @@
                             </div>
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom:24px;">
                                 <div class="article-meta">
-                                    <span class="article-category" style="background:#60a5fa;padding:4px 12px;border-radius:12px;font-size:12px;margin-right:12px;">${data.category}</span>
+                                    <span class="article-category" style="background:#60a5fa;padding:4px 12px;border-radius:12px;font-size:12px;margin-right:12px;">${escapeHtml(data.category)}</span>
                                     <span style="color:#94a3b8;font-size:14px;margin-right:16px;">${new Date(data.updated_at).toLocaleString('zh-CN')}</span>
                                     <span style="color:#94a3b8;font-size:14px;"><i class="fa fa-eye"></i> ${data.views}</span>
                                 </div>
@@ -5883,11 +5776,14 @@
                         // 处理 Markdown 标题
                         contentWithPlaceholders = contentWithPlaceholders.replace(/^(#{1,6})\s+(.+)$/gm, function(match, hashes, text) {
                             const level = hashes.length;
-                            return `<h${level} style="color: #f8fafc; margin-top: 24px; margin-bottom: 12px;">${text}</h${level}>`;
+                            return `<h${level} style="color: #f8fafc; margin-top: 24px; margin-bottom: 12px;">${escapeHtml(text)}</h${level}>`;
                         });
                         
                         // 处理 Markdown 链接
-                        contentWithPlaceholders = contentWithPlaceholders.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" style="color: #3b82f6; text-decoration: underline; display: inline; cursor: pointer; position: relative; z-index: 100;">$1</a>');
+                        contentWithPlaceholders = contentWithPlaceholders.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(match, linkText, url) {
+                            url = url.replace(/javascript:/gi, '');
+                            return '<a href="' + escapeHtml(url) + '" target="_blank" style="color: #3b82f6; text-decoration: underline; display: inline; cursor: pointer; position: relative; z-index: 100;">' + escapeHtml(linkText) + '</a>';
+                        });
                         
                         // 添加链接点击事件处理
                         setTimeout(() => {
@@ -5908,7 +5804,7 @@
                             const { lang, code } = codeBlocks[i];
                             const codeHTML = `<div class="code-block-container">
                                 <div class="code-block-header">
-                                    <span class="code-language">${lang}</span>
+                                    <span class="code-language">${escapeHtml(lang)}</span>
                                 </div>
                                 <pre class="code-block"><code class="language-${lang}">${escapeHtml(code)}</code></pre>
                             </div>`;
@@ -5951,7 +5847,7 @@
                 })
                 .catch(error => {
                     console.error('Error:', error);
-                    articleList.innerHTML = `<div style="text-align: center; padding: 40px; color: red;">Error: ${escapeHtml(error.message)}</div>`;
+                    articleList.innerHTML = `<div style="text-align: center; padding: 40px; color: red;">错误: ${escapeHtml(error.message)}</div>`;
                     if (error.message.includes('401')) {
                         // 未授权，重新检查认证状态
                         checkAuth();

@@ -18,7 +18,7 @@ if errorlevel 1 (
 )
 
 echo 安装依赖（首次运行）...
-pip install flask flask-cors -q
+pip install flask flask-cors pyjwt passlib -q
 
 echo.
 echo 启动服务...
