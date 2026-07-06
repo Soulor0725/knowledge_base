@@ -1,17 +1,27 @@
-from flask import Flask, request, jsonify, send_from_directory, g, make_response
+from flask import Flask, request, jsonify, send_from_directory, g, make_response, Response, stream_with_context
 import io
 import csv
 import urllib.parse
 import codecs
 from flask_cors import CORS
+from flask_compress import Compress
 import sqlite3
 from datetime import datetime, timedelta, timezone
 import os
 import re
 from werkzeug.utils import secure_filename
+from werkzeug.exceptions import BadRequest
 import jwt
 from passlib.hash import pbkdf2_sha256
 from functools import wraps
+import time
+import threading
+
+# 简单内存频率限制，限制大小防止DoS
+MAX_LOGIN_ATTEMPT_ENTRIES = 10000  # 最多10000条IP记录
+login_attempts = {}
+RATE_LIMIT_WINDOW = 300  # 5分钟窗口
+RATE_LIMIT_MAX = 10      # 窗口内最大尝试次数
 
 # 调试启动信息
 print("="*50)
@@ -22,8 +32,47 @@ print("="*50)
 
 app = Flask(__name__, static_folder='static')
 CORS(app, origins=['http://localhost:5001', 'http://127.0.0.1:5001'])
+Compress(app)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or os.urandom(32).hex()
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB 上传大小限制
+
+@app.errorhandler(400)
+def bad_request(e):
+    return jsonify({'error': '请求参数错误'}), 400
+
+@app.errorhandler(BadRequest)
+def handle_bad_request(e):
+    return jsonify({'error': '请求体格式错误或参数无效'}), 400
+
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({'error': '资源不存在'}), 404
+
+@app.errorhandler(405)
+def method_not_allowed(e):
+    return jsonify({'error': '请求方法不允许'}), 405
+
+@app.errorhandler(413)
+def request_entity_too_large(e):
+    return jsonify({'error': '请求体超过大小限制(最大16MB)'}), 413
+
+@app.errorhandler(429)
+def too_many_requests(e):
+    return jsonify({'error': '请求过于频繁，请稍后再试'}), 429
+
+@app.errorhandler(500)
+def internal_error(e):
+    return jsonify({'error': '服务器内部错误'}), 500
+
+
+
+@app.after_request
+def add_cache_headers(response):
+    if request.path.startswith('/static/') and not request.path.startswith('/static/uploads/'):
+        response.headers['Cache-Control'] = 'public, max-age=86400'
+    elif request.path.startswith('/api/stats') or request.path.startswith('/api/tags'):
+        response.headers['Cache-Control'] = 'private, max-age=60'
+    return response
 
 @app.route('/favicon.ico')
 def favicon():
@@ -32,6 +81,7 @@ def favicon():
 DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'knowledge_base.db')
 UPLOAD_FOLDER = os.path.join('static', 'uploads')
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+ALLOWED_MIME_TYPES = {'image/png', 'image/jpeg', 'image/gif', 'image/webp'}
 
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -44,8 +94,13 @@ def sanitize_csv_field(value):
 def get_db():
     """获取数据库连接"""
     if 'db' not in g:
-        g.db = sqlite3.connect(DATABASE)
+        g.db = sqlite3.connect(DATABASE, check_same_thread=False)
         g.db.row_factory = sqlite3.Row
+        g.db.execute("PRAGMA foreign_keys = ON")
+        g.db.execute("PRAGMA journal_mode = WAL")
+        g.db.execute("PRAGMA busy_timeout = 5000")
+        g.db.execute("PRAGMA wal_autocheckpoint = 500")
+        g.db.execute("PRAGMA synchronous = NORMAL")
     return g.db
 
 @app.teardown_appcontext
@@ -55,41 +110,59 @@ def close_db(e=None):
     if db is not None:
         db.close()
 
-def generate_token(user_id):
-    """生成JWT token"""
+def generate_token(user_id, token_version=0):
+    """生成JWT token，包含 token_version 用于踢掉旧登录"""
     payload = {
         'user_id': user_id,
+        'ver': token_version,
         'exp': datetime.now(timezone.utc) + timedelta(days=7)  # 7天过期
     }
     return jwt.encode(payload, app.config['SECRET_KEY'], algorithm='HS256')
 
-def verify_token(token):
-    """验证JWT token"""
+def _decode_token(token):
+    """解码JWT token，返回 payload 或 None（不抛出异常）"""
     try:
-        payload = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
-        return payload['user_id']
-    except jwt.ExpiredSignatureError:
-        return None
-    except jwt.InvalidTokenError:
+        return jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
         return None
 
+
+def verify_token(token):
+    """验证JWT token（兼容旧调用），返回 user_id 或 None"""
+    payload = _decode_token(token)
+    if payload is None:
+        return None
+    return payload.get('user_id')
+
 def login_required(f):
-    """登录装饰器"""
+    """登录装饰器，同时校验 token_version 防止旧 token 继续使用"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         token = request.headers.get('Authorization')
         if not token:
             return jsonify({'error': '未提供认证token'}), 401
-        
+
         token = token.replace('Bearer ', '')
-        user_id = verify_token(token)
-        if not user_id:
+        payload = _decode_token(token)
+        if not payload:
             return jsonify({'error': '无效或过期的token'}), 401
-        
+
+        user_id = payload.get('user_id')
+        token_ver = payload.get('ver', 0)
+
+        # 校验 token_version 是否匹配当前用户版本
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute('SELECT token_version FROM users WHERE id = ?', (user_id,))
+        row = cursor.fetchone()
+        if not row:
+            return jsonify({'error': '用户不存在'}), 401
+        if row[0] != token_ver:
+            return jsonify({'error': '登录已在其他地方失效，请重新登录'}), 401
+
         g.user_id = user_id
         return f(*args, **kwargs)
     return decorated_function
-
 def init_db():
     """初始化数据库"""
     conn = sqlite3.connect(DATABASE)
@@ -173,6 +246,12 @@ def init_db():
     if 'status' not in columns:
         cursor.execute("ALTER TABLE kiwi_sales ADD COLUMN status TEXT DEFAULT '未发货'")
 
+    # 检查并添加 token_version 列（用于踢掉旧登录）
+    cursor.execute("PRAGMA table_info(users)")
+    user_columns = [col[1] for col in cursor.fetchall()]
+    if 'token_version' not in user_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN token_version INTEGER DEFAULT 0")
+
 
     # 创建加班记录表
     cursor.execute('''
@@ -204,15 +283,31 @@ def init_db():
         )
     ''')
 
+    # 建索引（放在所有 CREATE TABLE 之后）
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_articles_user_id ON articles(user_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_articles_updated_at ON articles(updated_at)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_kiwi_sales_user_id ON kiwi_sales(user_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_overtime_user_id ON overtime_records(user_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_overtime_date ON overtime_records(date)")
+    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_overtime_user_date ON overtime_records(user_id, date)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_expenses_user_id ON expenses(user_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(category)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_articles_user_category ON articles(user_id, category)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_articles_user_updated ON articles(user_id, updated_at DESC)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_kiwi_sales_user_created ON kiwi_sales(user_id, created_at DESC)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_expenses_user_date_cat ON expenses(user_id, date)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_expenses_user_yearmonth ON expenses(user_id, substr(date, 1, 7))")
+
     # 检查是否已有分类，如果没有则插入默认分类
     cursor.execute('SELECT COUNT(*) FROM categories')
     count = cursor.fetchone()[0]
     if count == 0:
         # 只在数据库为空时插入默认分类
-        cursor.execute("INSERT INTO categories (name, color) VALUES ('技术', '#667eea')")
-        cursor.execute("INSERT INTO categories (name, color) VALUES ('生活', '#764ba2')")
-        cursor.execute("INSERT INTO categories (name, color) VALUES ('学习', '#f093fb')")
-        cursor.execute("INSERT INTO categories (name, color) VALUES ('工作', '#4facfe')")
+        cursor.execute("INSERT INTO categories (name, color, user_id) VALUES ('技术', '#667eea', 0)")
+        cursor.execute("INSERT INTO categories (name, color, user_id) VALUES ('生活', '#764ba2', 0)")
+        cursor.execute("INSERT INTO categories (name, color, user_id) VALUES ('学习', '#f093fb', 0)")
+        cursor.execute("INSERT INTO categories (name, color, user_id) VALUES ('工作', '#4facfe', 0)")
 
     conn.commit()
     conn.close()
@@ -220,7 +315,9 @@ def init_db():
 @app.route('/api/auth/register', methods=['POST'])
 def register():
     """用户注册"""
-    data = request.get_json()
+    data, err = safe_get_json()
+    if err:
+        return err
     if not data:
         return jsonify({'error': '请提供用户名、密码和中文名'}), 400
     username = (data.get('username') or '').strip()
@@ -242,9 +339,11 @@ def register():
         hashed_password = pbkdf2_sha256.hash(password)
         cursor.execute('INSERT INTO users (username, password, name) VALUES (?, ?, ?)', (username, hashed_password, name))
         user_id = cursor.lastrowid
-        db.commit()
+        err = safe_commit(db)
+        if err:
+            return err
         
-        token = generate_token(user_id)
+        token = generate_token(user_id, token_version=0)
         return jsonify({'id': user_id, 'username': username, 'name': name, 'token': token, 'message': '注册成功'}), 201
     except sqlite3.IntegrityError:
         return jsonify({'error': '用户名已存在'}), 400
@@ -252,7 +351,23 @@ def register():
 @app.route('/api/auth/login', methods=['POST'])
 def login():
     """用户登录"""
-    data = request.get_json()
+    remote_ip = request.remote_addr or 'unknown'
+    now = time.time()
+    attempts = login_attempts.get(remote_ip, [])
+    attempts = [t for t in attempts if now - t < RATE_LIMIT_WINDOW]
+    login_attempts[remote_ip] = attempts
+    if len(login_attempts[remote_ip]) >= RATE_LIMIT_MAX:
+        return jsonify({'error': '登录尝试过于频繁，请5分钟后再试'}), 429
+    login_attempts[remote_ip].append(now)
+    # 限制总IP数量防止DoS（超过则删除最旧的50%）
+    if len(login_attempts) > MAX_LOGIN_ATTEMPT_ENTRIES:
+        sorted_ips = sorted(login_attempts, key=lambda ip: login_attempts[ip][-1] if login_attempts[ip] else 0)
+        for _ip in sorted_ips[:len(sorted_ips)//2]:
+            del login_attempts[_ip]
+
+    data, err = safe_get_json()
+    if err:
+        return err
     if not data:
         return jsonify({'error': '请提供用户名和密码'}), 400
     username = (data.get('username') or '').strip()
@@ -269,11 +384,155 @@ def login():
     if not user or not pbkdf2_sha256.verify(password, user['password']):
         return jsonify({'error': '用户名或密码错误'}), 401
     
-    token = generate_token(user['id'])
+    # 递增 token_version 踢掉之前的所有登录
+    cursor.execute('UPDATE users SET token_version = token_version + 1 WHERE id = ?', (user['id'],))
+    cursor.execute('SELECT token_version FROM users WHERE id = ?', (user['id'],))
+    new_ver = cursor.fetchone()[0]
+    safe_commit(db)
+    token = generate_token(user['id'], token_version=new_ver)
     # 检查 user 中是否有对应的列
     name = user['name'] if 'name' in user.keys() else ''
     avatar = user['avatar'] if 'avatar' in user.keys() else ''
     return jsonify({'id': user['id'], 'username': user['username'], 'name': name, 'avatar': avatar, 'token': token, 'message': '登录成功'})
+
+
+def safe_get_json():
+    """安全解析请求JSON，返回 (data, error_tuple_or_None)"""
+    try:
+        data = request.get_json(silent=True)
+        if data is None:
+            if not request.data or request.data.strip() == b'':
+                return {}, None
+            return None, (jsonify({'error': '请求体必须是合法JSON'}), 400)
+        if not isinstance(data, dict):
+            return None, (jsonify({'error': '请求体必须是JSON对象'}), 400)
+        return data, None
+    except Exception:
+        return None, (jsonify({'error': '请求体解析失败'}), 400)
+
+
+def safe_commit(db, max_retries=2):
+    """安全提交，失败时回滚并返回 (error_tuple_or_None)。暂时性锁冲突自动重试。"""
+    import time as _time
+    for attempt in range(max_retries + 1):
+        try:
+            db.commit()
+            return None
+        except sqlite3.OperationalError as e:
+            if "locked" in str(e) and attempt < max_retries:
+                _time.sleep(0.03 * (attempt + 1))
+                continue
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            return (jsonify({'error': '数据库操作失败'}), 500)
+        except sqlite3.Error:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            return (jsonify({'error': '数据库操作失败'}), 500)
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            return (jsonify({'error': '服务器内部错误'}), 500)
+
+
+def validate_date(date_str, field='日期'):
+    """验证 YYYY-MM-DD 格式"""
+    if not date_str:
+        return None
+    try:
+        datetime.strptime(date_str, '%Y-%m-%d')
+        return None
+    except (ValueError, TypeError):
+        return (jsonify({'error': f'{field}格式错误，请使用YYYY-MM-DD'}), 400)
+
+
+def clamp_pagination(page, page_size, max_size=50):
+    """瀹夊叏鍖栧垎椤靛弬鏁硷紝鍙傛暟鍙杋5,10,15] 鐘嗛€?5"""
+    CHOICES = (5, 10, 15)
+    try:
+        page = max(1, int(page))
+    except (ValueError, TypeError):
+        page = 1
+    try:
+        ps = int(page_size)
+    except (ValueError, TypeError):
+        ps = 5
+    if ps in CHOICES:
+        page_size = ps
+    else:
+        page_size = min(CHOICES, key=lambda c: abs(c - ps))
+        if page_size < 1:
+            page_size = 5
+    return page, page_size
+
+def _month_to_range(month_str):
+    try:
+        y, m = int(month_str[:4]), int(month_str[5:7])
+        start = f'{y:04d}-{m:02d}-01'
+        end = f'{y+1:04d}-01-01' if m == 12 else f'{y:04d}-{m+1:02d}-01'
+        return start, end
+    except (ValueError, TypeError, IndexError):
+        return None, None
+
+
+def _year_to_range(year_str):
+    try:
+        y = int(year_str)
+        return f'{y:04d}-01-01', f'{y+1:04d}-01-01'
+    except (ValueError, TypeError):
+        return None, None
+
+
+_CACHE_TTL = 300  # 缓存有效期 5 分钟
+_CACHE_MAX_SIZE = 1000  # 最多缓存 1000 个用户
+_stats_cache = {}
+_stats_cache_time = {}
+_tags_cache = {}
+_tags_cache_time = {}
+
+
+def _get_cached(cache, cache_time, user_id):
+    """获取缓存值，如果过期或不存在返回 None。"""
+    import time as _time
+    ts = cache_time.get(user_id)
+    if ts is None:
+        return _CACHE_EXPIRED
+    if _time.time() - ts > _CACHE_TTL:
+        return _CACHE_EXPIRED
+    return cache.get(user_id)
+
+
+def _set_cached(cache, cache_time, user_id, value):
+    """设置缓存，超限时清除最旧的条目。"""
+    import time as _time
+    cache[user_id] = value
+    cache_time[user_id] = _time.time()
+    if len(cache) > _CACHE_MAX_SIZE:
+        oldest = sorted(cache_time, key=lambda k: cache_time[k])[:len(cache)//2]
+        for k in oldest:
+            cache.pop(k, None)
+            cache_time.pop(k, None)
+
+
+_CACHE_EXPIRED = object()
+_cache_lock = threading.Lock()
+
+
+def _invalidate_stats(user_id):
+    _stats_cache.pop(user_id, None)
+    _stats_cache_time.pop(user_id, None)
+
+
+def _invalidate_tags(user_id):
+    _tags_cache.pop(user_id, None)
+    _tags_cache_time.pop(user_id, None)
+
 
 @app.route('/')
 def index():
@@ -291,7 +550,9 @@ def get_current_user():
         user = cursor.fetchone()
         return jsonify(dict(user))
     elif request.method == 'PUT':
-        data = request.get_json()
+        data, err = safe_get_json()
+        if err:
+            return err
         name = data.get('name', '').strip()
         avatar = data.get('avatar', '')
         
@@ -300,7 +561,9 @@ def get_current_user():
         
         try:
             cursor.execute('UPDATE users SET name = ?, avatar = ? WHERE id = ?', (name, avatar, g.user_id))
-            db.commit()
+            err = safe_commit(db)
+            if err:
+                return err
             
             # 返回更新后的用户信息
             cursor.execute('SELECT id, username, name, avatar, created_at FROM users WHERE id = ?', (g.user_id,))
@@ -318,10 +581,11 @@ def get_articles():
     tag = request.args.get('tag')
     search = request.args.get('search')
     favorite = request.args.get('favorite')
-    page = request.args.get('page', 1, type=int)
-    page_size = request.args.get('page_size', 5, type=int)
+    page, page_size = clamp_pagination(
+        request.args.get('page', 1, type=int),
+        request.args.get('page_size', 5, type=int))
 
-    base_query = 'SELECT * FROM articles WHERE user_id = ?'
+    base_query = 'SELECT id, title, category, tags, created_at, updated_at, views, is_favorite, is_draft FROM articles WHERE user_id = ?'
     count_query = 'SELECT COUNT(*) FROM articles WHERE user_id = ?'
     params = [g.user_id]
 
@@ -361,7 +625,9 @@ def get_articles():
 @app.route('/api/articles/batch-delete', methods=['POST'])
 @login_required
 def batch_delete_articles():
-    data = request.get_json()
+    data, err = safe_get_json()
+    if err:
+        return err
     ids = data.get('ids', [])
     if not ids or not isinstance(ids, list):
         return jsonify({'error': '请提供要删除的文章ID列表'}), 400
@@ -372,7 +638,11 @@ def batch_delete_articles():
     placeholders = ','.join(['?'] * len(ids))
     cursor.execute(f'DELETE FROM articles WHERE id IN ({placeholders}) AND user_id=?', ids + [g.user_id])
     deleted = cursor.rowcount
-    db.commit()
+    err = safe_commit(db)
+    if err:
+        return err
+    _invalidate_tags(g.user_id)
+    _invalidate_stats(g.user_id)
     return jsonify({'message': f'成功删除 {deleted} 条记录', 'deleted': deleted})
 
 @app.route('/api/articles/navigate', methods=['GET'])
@@ -391,9 +661,9 @@ def get_navigate_article():
         cursor = db.cursor()
         
         if direction == 'prev':
-            query = 'SELECT * FROM articles WHERE id < ? AND user_id = ? ORDER BY id DESC LIMIT 1'
+            query = 'SELECT id, title, category, tags, created_at, updated_at, views, is_favorite, is_draft FROM articles WHERE id < ? AND user_id = ? ORDER BY id DESC LIMIT 1'
         else:
-            query = 'SELECT * FROM articles WHERE id > ? AND user_id = ? ORDER BY id ASC LIMIT 1'
+            query = 'SELECT id, title, category, tags, created_at, updated_at, views, is_favorite, is_draft FROM articles WHERE id > ? AND user_id = ? ORDER BY id ASC LIMIT 1'
         
         cursor.execute(query, (current_id, user_id))
         article = cursor.fetchone()
@@ -415,15 +685,20 @@ def get_article(article_id):
     cursor.execute('SELECT * FROM articles WHERE id = ? AND user_id = ?', (article_id, g.user_id))
     article = cursor.fetchone()
     if article:
-        cursor.execute('UPDATE articles SET views = views + 1 WHERE id = ?', (article_id,))
-        db.commit()
+        try:
+            db.execute('UPDATE articles SET views = views + 1 WHERE id = ?', (article_id,))
+            db.commit()
+        except Exception:
+            pass
         return jsonify(dict(article))
     return jsonify({'error': '文章不存在'}), 404
 
 @app.route('/api/articles', methods=['POST'])
 @login_required
 def create_article():
-    data = request.get_json()
+    data, err = safe_get_json()
+    if err:
+        return err
     title = data.get('title')
     content = data.get('content')
     category = data.get('category', '未分类')
@@ -435,24 +710,43 @@ def create_article():
             return jsonify({'error': '标题不能为空'}), 400
         if not content:
             return jsonify({'error': '内容不能为空'}), 400
+    if title and len(title) > 200:
+        return jsonify({'error': '标题不能超过200个字符'}), 400
+    if content and len(content) > 65535:
+        return jsonify({'error': '内容不能超过65535个字符'}), 400
+    if tags and len(tags) > 500:
+        return jsonify({'error': '标签不能超过500个字符'}), 400
 
     db = get_db()
     cursor = db.cursor()
     cursor.execute('INSERT INTO articles (title, content, category, tags, is_draft, user_id) VALUES (?, ?, ?, ?, ?, ?)',
                   (title, content, category, tags, int(is_draft), g.user_id))
     article_id = cursor.lastrowid
-    db.commit()
+    err = safe_commit(db)
+    if err:
+        return err
+    _invalidate_tags(g.user_id)
+    _invalidate_stats(g.user_id)
     return jsonify({'id': article_id, 'message': '创建成功'}), 201
 
 @app.route('/api/articles/<int:article_id>', methods=['PUT'])
 @login_required
 def update_article(article_id):
-    data = request.get_json()
+    data, err = safe_get_json()
+    if err:
+        return err
     db = get_db()
     cursor = db.cursor()
     cursor.execute('SELECT id FROM articles WHERE id = ? AND user_id = ?', (article_id, g.user_id))
     if not cursor.fetchone():
         return jsonify({'error': '文章不存在'}), 404
+
+    if 'title' in data and data['title'] and len(data['title']) > 200:
+        return jsonify({'error': '标题不能超过200个字符'}), 400
+    if 'content' in data and data['content'] and len(data['content']) > 65535:
+        return jsonify({'error': '内容不能超过65535个字符'}), 400
+    if 'tags' in data and data['tags'] and len(data['tags']) > 500:
+        return jsonify({'error': '标签不能超过500个字符'}), 400
 
     updates = []
     params = []
@@ -481,7 +775,11 @@ def update_article(article_id):
     params.append(g.user_id)
 
     cursor.execute(f"UPDATE articles SET {', '.join(updates)} WHERE id = ? AND user_id = ?", params)
-    db.commit()
+    err = safe_commit(db)
+    if err:
+        return err
+    _invalidate_tags(g.user_id)
+    _invalidate_stats(g.user_id)
     return jsonify({'message': '更新成功'})
 
 @app.route('/api/articles/<int:article_id>', methods=['DELETE'])
@@ -492,7 +790,11 @@ def delete_article(article_id):
     cursor.execute('DELETE FROM articles WHERE id = ? AND user_id = ?', (article_id, g.user_id))
     if cursor.rowcount == 0:
         return jsonify({'error': '文章不存在'}), 404
-    db.commit()
+    err = safe_commit(db)
+    if err:
+        return err
+    _invalidate_tags(g.user_id)
+    _invalidate_stats(g.user_id)
     return jsonify({'message': '删除成功'})
 
 @app.route('/api/articles/<int:article_id>/favorite', methods=['POST'])
@@ -500,12 +802,14 @@ def delete_article(article_id):
 def toggle_favorite(article_id):
     db = get_db()
     cursor = db.cursor()
-    cursor.execute('UPDATE articles SET is_favorite = NOT is_favorite WHERE id = ? AND user_id = ?', (article_id, g.user_id))
-    if cursor.rowcount == 0:
+    cursor.execute('UPDATE articles SET is_favorite = NOT is_favorite WHERE id = ? AND user_id = ? RETURNING is_favorite', (article_id, g.user_id))
+    row = cursor.fetchone()
+    if row is None:
         return jsonify({'error': '文章不存在'}), 404
-    cursor.execute('SELECT is_favorite FROM articles WHERE id = ? AND user_id = ?', (article_id, g.user_id))
-    is_favorite = cursor.fetchone()[0]
-    db.commit()
+    is_favorite = row[0]
+    err = safe_commit(db)
+    if err:
+        return err
     return jsonify({'is_favorite': bool(is_favorite)})
 
 @app.route('/api/categories', methods=['GET'])
@@ -517,16 +821,19 @@ def get_categories():
         SELECT c.*, COUNT(a.id) as article_count
         FROM categories c
         LEFT JOIN articles a ON c.name = a.category AND a.user_id = ?
+        WHERE c.user_id = ? OR c.user_id = 0
         GROUP BY c.id
         ORDER BY c.created_at
-    ''', (g.user_id,))
+    ''', (g.user_id, g.user_id))
     categories = [dict(row) for row in cursor.fetchall()]
     return jsonify(categories)
 
 @app.route('/api/categories', methods=['POST'])
 @login_required
 def create_category():
-    data = request.get_json()
+    data, err = safe_get_json()
+    if err:
+        return err
     name = data.get('name', '').strip()
     color = data.get('color', '#667eea')
     if not name:
@@ -538,85 +845,98 @@ def create_category():
     db = get_db()
     cursor = db.cursor()
     try:
-        cursor.execute('INSERT INTO categories (name, color) VALUES (?, ?)', (name, color))
+        cursor.execute('INSERT INTO categories (name, color, user_id) VALUES (?, ?, ?)', (name, color, g.user_id))
         category_id = cursor.lastrowid
-        db.commit()
+        err = safe_commit(db)
+        if err:
+            return err
         return jsonify({'id': category_id, 'message': '创建成功'}), 201
     except sqlite3.IntegrityError:
         return jsonify({'error': '分类已存在'}), 400
 
-@app.route('/api/categories/<category_id>', methods=['DELETE'])
+@app.route('/api/categories/<int:category_id>', methods=['DELETE'])
 @login_required
 def delete_category(category_id):
     db = get_db()
     cursor = db.cursor()
-    
-    # 先检查是否是纯数字，如果是纯数字则按名称删除，避免误删
-    is_numeric = isinstance(category_id, str) and category_id.isdigit()
-    
-    if not is_numeric:
-        # 不是纯数字，尝试按ID删除
-        try:
-            cursor.execute('SELECT name FROM categories WHERE id = ? AND user_id = ?', (int(category_id), g.user_id))
-            row = cursor.fetchone()
-            if row:
-                cat_name = row['name']
-                cursor.execute('DELETE FROM categories WHERE id = ? AND user_id = ?', (int(category_id), g.user_id))
-                cursor.execute("UPDATE articles SET category = '未分类' WHERE category = ? AND user_id = ?", (cat_name, g.user_id))
-                db.commit()
-                return jsonify({'message': '删除成功'})
-        except (ValueError, TypeError):
-            pass
-    
-    # 按名称删除
-    category_name = str(category_id)
-    cursor.execute('DELETE FROM categories WHERE name = ? AND user_id = ?', (category_name, g.user_id))
-    if cursor.rowcount > 0:
-        # 将引用该分类的文章设为"未分类"
-        cursor.execute("UPDATE articles SET category = '未分类' WHERE category = ? AND user_id = ?", (category_name, g.user_id))
-        db.commit()
+    cursor.execute('SELECT name FROM categories WHERE id = ? AND (user_id = ? OR user_id = 0)', (category_id, g.user_id))
+    row = cursor.fetchone()
+    if not row:
+        return jsonify({'error': '分类不存在'}), 404
+    cat_name = row['name']
+    try:
+        cursor.execute('DELETE FROM categories WHERE id = ? AND (user_id = ? OR user_id = 0)', (category_id, g.user_id))
+        cursor.execute("UPDATE articles SET category = '未分类' WHERE category = ? AND user_id = ?", (cat_name, g.user_id))
+        err = safe_commit(db)
+        if err:
+            return err
         return jsonify({'message': '删除成功'})
-    
-    # 没有找到记录
-    db.commit()
-    return jsonify({'message': '删除失败，分类不存在'}), 404
+    except Exception:
+        db.rollback()
+        return jsonify({'error': '删除失败'}), 500
+
+def _iter_rows(cursor, size=500):
+    while True:
+        rows = cursor.fetchmany(size)
+        if not rows:
+            break
+        for r in rows:
+            yield r
+
+
+def _fetchall_dicts(cursor):
+    """Prefetch all rows as dicts while cursor is alive."""
+    cols = [d[0] for d in cursor.description] if cursor.description else []
+    return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
 
 @app.route('/api/stats', methods=['GET'])
 @login_required
 def get_stats():
-    db = get_db()
-    cursor = db.cursor()
-    cursor.execute('SELECT COUNT(*) FROM articles WHERE user_id = ?', (g.user_id,))
-    total_articles = cursor.fetchone()[0]
-    cursor.execute('SELECT COUNT(*) FROM articles WHERE is_favorite = 1 AND user_id = ?', (g.user_id,))
-    favorites = cursor.fetchone()[0]
-    cursor.execute('SELECT SUM(views) FROM articles WHERE user_id = ?', (g.user_id,))
-    total_views = cursor.fetchone()[0] or 0
-    cursor.execute('SELECT COUNT(DISTINCT category) FROM articles WHERE user_id = ?', (g.user_id,))
-    categories_used = cursor.fetchone()[0]
-    return jsonify({
-        'total_articles': total_articles,
-        'favorites': favorites,
-        'total_views': total_views,
-        'categories_used': categories_used
-    })
+    cache_key = g.user_id
+    cached = _get_cached(_stats_cache, _stats_cache_time, cache_key)
+    if cached is not _CACHE_EXPIRED and cached is not None:
+        return jsonify(cached)
+
+    cursor = get_db().execute('''
+        SELECT
+            COUNT(*) AS total_articles,
+            SUM(CASE WHEN is_favorite = 1 THEN 1 ELSE 0 END) AS favorites,
+            COALESCE(SUM(views), 0) AS total_views,
+            COUNT(DISTINCT category) AS categories_used
+        FROM articles WHERE user_id = ?
+    ''', (g.user_id,))
+    row = cursor.fetchone()
+    result = {
+        'total_articles': row['total_articles'],
+        'favorites': row['favorites'],
+        'total_views': row['total_views'],
+        'categories_used': row['categories_used']
+    }
+    _set_cached(_stats_cache, _stats_cache_time, cache_key, result)
+    return jsonify(result)
 
 @app.route('/api/tags', methods=['GET'])
 @login_required
 def get_all_tags():
+    cache_key = g.user_id
+    cached = _get_cached(_tags_cache, _tags_cache_time, cache_key)
+    if cached is not _CACHE_EXPIRED and cached is not None:
+        return jsonify(cached)
+
     db = get_db()
     cursor = db.cursor()
     cursor.execute('SELECT tags FROM articles WHERE tags != "" AND user_id = ?', (g.user_id,))
-    all_tags = []
-    for row in cursor.fetchall():
-        if row[0]:
-            tags = [t.strip() for t in row[0].split(',') if t.strip()]
-            all_tags.extend(tags)
     tag_counts = {}
-    for tag in all_tags:
-        tag_counts[tag] = tag_counts.get(tag, 0) + 1
+    for row in cursor.fetchall():
+        for tag in row[0].split(','):
+            tag = tag.strip()
+            if tag:
+                tag_counts[tag] = tag_counts.get(tag, 0) + 1
     sorted_tags = sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)
-    return jsonify([{'name': tag, 'count': count} for tag, count in sorted_tags])
+    result = [{'name': tag, 'count': count} for tag, count in sorted_tags]
+    _set_cached(_tags_cache, _tags_cache_time, cache_key, result)
+    return jsonify(result)
 
 @app.route('/api/upload', methods=['POST'])
 @login_required
@@ -626,17 +946,21 @@ def upload_file():
     file = request.files['file']
     if file.filename == '':
         return jsonify({'error': '没有选择文件'}), 400
-    if file and '.' in file.filename and file.filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS:
-        filename = secure_filename(file.filename)
-        # 生成唯一文件名
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"{timestamp}_{filename}"
-        filepath = os.path.join(UPLOAD_FOLDER, filename)
-        file.save(filepath)
-        # 返回相对路径
-        url = f"/static/uploads/{filename}"
-        return jsonify({'url': url, 'filename': filename})
-    return jsonify({'error': '不支持的文件类型'}), 400
+    if not (file and '.' in file.filename and file.filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS):
+        return jsonify({'error': '不支持的文件类型'}), 400
+    if file.content_type not in ALLOWED_MIME_TYPES:
+        return jsonify({'error': '文件内容类型不合法'}), 400
+    file.seek(0, os.SEEK_END)
+    if file.tell() == 0:
+        return jsonify({'error': '文件内容为空'}), 400
+    file.seek(0)
+    filename = secure_filename(file.filename)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f"{timestamp}_{filename}"
+    filepath = os.path.join(UPLOAD_FOLDER, filename)
+    file.save(filepath)
+    url = f"/static/uploads/{filename}"
+    return jsonify({'url': url, 'filename': filename})
 
 # 获取猕猴桃销售列表
 @app.route('/api/kiwi-sales', methods=['GET'])
@@ -646,8 +970,9 @@ def get_kiwi_sales():
     cursor = db.cursor()
     
     # 分页参数
-    page = request.args.get('page', 1, type=int)
-    page_size = request.args.get('page_size', 5, type=int)
+    page, page_size = clamp_pagination(
+        request.args.get('page', 1, type=int),
+        request.args.get('page_size', 5, type=int))
     offset = (page - 1) * page_size
     
     # 搜索参数
@@ -668,8 +993,10 @@ def get_kiwi_sales():
         params.append(f'%{phone}%')
     
     if year:
-        conditions.append("strftime('%Y', order_date) = ?")
-        params.append(year)
+        yr_start, yr_end = _year_to_range(year)
+        if yr_start and yr_end:
+            conditions.append("order_date >= ? AND order_date < ?")
+            params.extend([yr_start, yr_end])
     
     where_clause = 'WHERE ' + ' AND '.join(conditions)
     
@@ -679,7 +1006,7 @@ def get_kiwi_sales():
     total = cursor.fetchone()[0]
     
     # 获取数据
-    data_query = f'''SELECT * FROM kiwi_sales {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?'''
+    data_query = f'''SELECT id, customer_name, phone, address, order_date, status, tracking_number, remark, quantity, payment_amount, created_at FROM kiwi_sales {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?'''
     params.extend([page_size, offset])
     cursor.execute(data_query, params)
     
@@ -696,8 +1023,9 @@ def get_kiwi_sales():
 @app.route('/api/kiwi-sales', methods=['POST'])
 @login_required
 def add_kiwi_sale():
-    data = request.get_json()
-    
+    data, err = safe_get_json()
+    if err:
+        return err
     if not data:
         return jsonify({'error': '请提供订单信息（客户名、电话、地址、接单日期等）'}), 400
     
@@ -725,6 +1053,9 @@ def add_kiwi_sale():
     order_date = data.get('order_date')
     if not order_date:
         return jsonify({'error': '接单日期不能为空'}), 400
+    date_err = validate_date(order_date, '接单日期')
+    if date_err:
+        return date_err
     
     # 发货日期校验
     ship_date = data.get('ship_date', '')
@@ -768,7 +1099,9 @@ def add_kiwi_sale():
         INSERT INTO kiwi_sales (customer_name, phone, address, order_date, status, tracking_number, remark, quantity, payment_amount, user_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (customer_name, phone, address, order_date, status, tracking_number, remark, quantity, payment_amount, g.user_id))
-    db.commit()
+    err = safe_commit(db)
+    if err:
+        return err
 
     return jsonify({'message': '添加成功', 'id': cursor.lastrowid}), 201
 
@@ -776,8 +1109,9 @@ def add_kiwi_sale():
 @app.route('/api/kiwi-sales/<int:sale_id>', methods=['PUT'])
 @login_required
 def update_kiwi_sale(sale_id):
-    data = request.get_json()
-    
+    data, err = safe_get_json()
+    if err:
+        return err
     if not data:
         return jsonify({'error': '请提供订单信息（客户名、电话、地址、接单日期等）'}), 400
     
@@ -805,6 +1139,9 @@ def update_kiwi_sale(sale_id):
     order_date = data.get('order_date')
     if not order_date:
         return jsonify({'error': '接单日期不能为空'}), 400
+    date_err = validate_date(order_date, '接单日期')
+    if date_err:
+        return date_err
     
     # 发货日期校验
     ship_date = data.get('ship_date', '')
@@ -850,7 +1187,9 @@ def update_kiwi_sale(sale_id):
     ''', (customer_name, phone, address, order_date, status, tracking_number, remark, quantity, payment_amount, sale_id, g.user_id))
     if cursor.rowcount == 0:
         return jsonify({'error': '记录不存在'}), 404
-    db.commit()
+    err = safe_commit(db)
+    if err:
+        return err
     return jsonify({'message': '更新成功'})
 
 # 删除猕猴桃销售记录
@@ -862,23 +1201,31 @@ def delete_kiwi_sale(sale_id):
     cursor.execute('DELETE FROM kiwi_sales WHERE id=? AND user_id=?', (sale_id, g.user_id))
     if cursor.rowcount == 0:
         return jsonify({'error': '记录不存在'}), 404
-    db.commit()
+    err = safe_commit(db)
+    if err:
+        return err
     return jsonify({'message': '删除成功'})
 
 # 批量删除猕猴桃销售记录
 @app.route('/api/kiwi-sales/batch-delete', methods=['POST'])
 @login_required
 def batch_delete_kiwi_sales():
-    data = request.get_json()
+    data, err = safe_get_json()
+    if err:
+        return err
     ids = data.get('ids', [])
     if not ids or not isinstance(ids, list):
         return jsonify({'error': '请提供要删除的记录ID列表'}), 400
+    if len(ids) > 100:
+        return jsonify({'error': '单次删除不能超过100条记录'}), 400
     db = get_db()
     cursor = db.cursor()
     placeholders = ','.join(['?'] * len(ids))
     cursor.execute(f'DELETE FROM kiwi_sales WHERE id IN ({placeholders}) AND user_id=?', ids + [g.user_id])
     deleted = cursor.rowcount
-    db.commit()
+    err = safe_commit(db)
+    if err:
+        return err
     return jsonify({'message': f'成功删除 {deleted} 条记录', 'deleted': deleted})
 
 # 猕猴桃销售报表统计
@@ -889,8 +1236,9 @@ def get_kiwi_sales_report():
     cursor = db.cursor()
     
     # 获取分页参数
-    page = request.args.get('page', 1, type=int)
-    page_size = request.args.get('page_size', 5, type=int)
+    page, page_size = clamp_pagination(
+        request.args.get('page', 1, type=int),
+        request.args.get('page_size', 5, type=int))
     
     # 获取年份筛选参数
     year = request.args.get('year', '', type=str)
@@ -899,8 +1247,10 @@ def get_kiwi_sales_report():
     year_filter = ''
     year_params = []
     if year:
-        year_filter = "AND strftime('%Y', order_date) = ?"
-        year_params = [year]
+        yr_start, yr_end = _year_to_range(year)
+        if yr_start and yr_end:
+            year_filter = 'AND order_date >= ? AND order_date < ?'
+            year_params = [yr_start, yr_end]
     
     # 先获取所有客户数据进行分组计算
     cursor.execute(f'''
@@ -909,6 +1259,7 @@ def get_kiwi_sales_report():
         WHERE user_id = ? AND customer_name IS NOT NULL AND customer_name != '' {year_filter}
         GROUP BY customer_name, remark
         ORDER BY customer_name, remark
+        LIMIT 5000
     ''', (g.user_id,) + tuple(year_params))
     
     all_results = [dict(row) for row in cursor.fetchall()]
@@ -925,8 +1276,8 @@ def get_kiwi_sales_report():
                 'total_amount': 0
             }
         grouped_data[customer]['items'].append(row)
-        grouped_data[customer]['total_quantity'] += row['total_quantity']
-        grouped_data[customer]['total_amount'] += row['total_amount']
+        grouped_data[customer]['total_quantity'] += (row['total_quantity'] or 0)
+        grouped_data[customer]['total_amount'] += (row['total_amount'] or 0)
     
     # 转换为列表并计算分页
     customers_list = list(grouped_data.values())
@@ -1005,8 +1356,9 @@ def calculate_overtime_duration(overtime_type, start_time, end_time):
 @app.route('/api/overtime', methods=['GET'])
 @login_required
 def get_overtime_records():
-    page = request.args.get('page', 1, type=int)
-    page_size = request.args.get('page_size', 5, type=int)
+    page, page_size = clamp_pagination(
+        request.args.get('page', 1, type=int),
+        request.args.get('page_size', 5, type=int))
     month = request.args.get('month', '', type=str)
     offset = (page - 1) * page_size
 
@@ -1014,8 +1366,10 @@ def get_overtime_records():
     params = [g.user_id]
 
     if month:
-        conditions.append("strftime('%Y-%m', date) = ?")
-        params.append(month)
+        m_start, m_end = _month_to_range(month)
+        if m_start and m_end:
+            conditions.append('date >= ? AND date < ?')
+            params.extend([m_start, m_end])
 
     where_clause = ' AND '.join(conditions)
 
@@ -1025,7 +1379,7 @@ def get_overtime_records():
     cursor.execute(f'SELECT COUNT(*) FROM overtime_records WHERE {where_clause}', params)
     total = cursor.fetchone()[0]
 
-    cursor.execute(f'SELECT * FROM overtime_records WHERE {where_clause} ORDER BY date DESC, start_time DESC LIMIT ? OFFSET ?',
+    cursor.execute(f'SELECT id, overtime_type, date, start_time, end_time, duration, remark FROM overtime_records WHERE {where_clause} ORDER BY date DESC, start_time DESC LIMIT ? OFFSET ?',
                    params + [page_size, offset])
     records = [dict(row) for row in cursor.fetchall()]
 
@@ -1040,7 +1394,9 @@ def get_overtime_records():
 @app.route('/api/overtime', methods=['POST'])
 @login_required
 def add_overtime_record():
-    data = request.get_json()
+    data, err = safe_get_json()
+    if err:
+        return err
     overtime_type = data.get('overtime_type', '')
     date = data.get('date', '').strip()
     start_time = data.get('start_time', '').strip()
@@ -1051,6 +1407,9 @@ def add_overtime_record():
         return jsonify({'error': '加班类型必须是 平时加班 或 周末加班'}), 400
     if not date:
         return jsonify({'error': '日期不能为空'}), 400
+    date_err = validate_date(date)
+    if date_err:
+        return date_err
     if not start_time or not end_time:
         return jsonify({'error': '开始时间和结束时间不能为空'}), 400
 
@@ -1093,7 +1452,9 @@ def add_overtime_record():
 
     cursor.execute('INSERT INTO overtime_records (overtime_type, date, start_time, end_time, duration, remark, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
                    (overtime_type, date, start_time, end_time, duration, remark, g.user_id))
-    db.commit()
+    err = safe_commit(db)
+    if err:
+        return err
 
     return jsonify({'message': '添加成功', 'id': cursor.lastrowid, 'duration': duration}), 201
 
@@ -1101,7 +1462,9 @@ def add_overtime_record():
 @app.route('/api/overtime/<int:record_id>', methods=['PUT'])
 @login_required
 def update_overtime_record(record_id):
-    data = request.get_json()
+    data, err = safe_get_json()
+    if err:
+        return err
     overtime_type = data.get('overtime_type', '')
     date = data.get('date', '').strip()
     start_time = data.get('start_time', '').strip()
@@ -1112,6 +1475,9 @@ def update_overtime_record(record_id):
         return jsonify({'error': '加班类型必须是 平时加班 或 周末加班'}), 400
     if not date:
         return jsonify({'error': '日期不能为空'}), 400
+    date_err = validate_date(date)
+    if date_err:
+        return date_err
     if not start_time or not end_time:
         return jsonify({'error': '开始时间和结束时间不能为空'}), 400
 
@@ -1155,7 +1521,9 @@ def update_overtime_record(record_id):
                    (overtime_type, date, start_time, end_time, duration, remark, record_id, g.user_id))
     if cursor.rowcount == 0:
         return jsonify({'error': '记录不存在'}), 404
-    db.commit()
+    err = safe_commit(db)
+    if err:
+        return err
 
     return jsonify({'message': '更新成功', 'duration': duration})
 
@@ -1168,23 +1536,31 @@ def delete_overtime_record(record_id):
     cursor.execute('DELETE FROM overtime_records WHERE id=? AND user_id=?', (record_id, g.user_id))
     if cursor.rowcount == 0:
         return jsonify({'error': '记录不存在'}), 404
-    db.commit()
+    err = safe_commit(db)
+    if err:
+        return err
     return jsonify({'message': '删除成功'})
 
 # 批量删除加班记录
 @app.route('/api/overtime/batch-delete', methods=['POST'])
 @login_required
 def batch_delete_overtime_records():
-    data = request.get_json()
+    data, err = safe_get_json()
+    if err:
+        return err
     ids = data.get('ids', [])
     if not ids or not isinstance(ids, list):
         return jsonify({'error': '请提供要删除的记录ID列表'}), 400
+    if len(ids) > 100:
+        return jsonify({'error': '单次删除不能超过100条记录'}), 400
     db = get_db()
     cursor = db.cursor()
     placeholders = ','.join(['?'] * len(ids))
     cursor.execute(f'DELETE FROM overtime_records WHERE id IN ({placeholders}) AND user_id=?', ids + [g.user_id])
     deleted = cursor.rowcount
-    db.commit()
+    err = safe_commit(db)
+    if err:
+        return err
     return jsonify({'message': f'成功删除 {deleted} 条记录', 'deleted': deleted})
 
 
@@ -1198,12 +1574,18 @@ def get_overtime_stats():
     cursor = db.cursor()
 
     if month:
-        cursor.execute("SELECT SUM(duration) FROM overtime_records WHERE user_id = ? AND overtime_type = 'weekday' AND strftime('%Y-%m', date) = ?", (g.user_id, month))
-        weekday_total = cursor.fetchone()[0] or 0
-        cursor.execute("SELECT SUM(duration) FROM overtime_records WHERE user_id = ? AND overtime_type = 'weekend' AND strftime('%Y-%m', date) = ?", (g.user_id, month))
-        weekend_total = cursor.fetchone()[0] or 0
-        cursor.execute("SELECT COUNT(*) FROM overtime_records WHERE user_id = ? AND strftime('%Y-%m', date) = ?", (g.user_id, month))
-        total_count = cursor.fetchone()[0]
+        m_start, m_end = _month_to_range(month)
+        if m_start and m_end:
+            cursor.execute("SELECT SUM(duration) FROM overtime_records WHERE user_id = ? AND overtime_type = 'weekday' AND date >= ? AND date < ?", (g.user_id, m_start, m_end))
+            weekday_total = cursor.fetchone()[0] or 0
+            cursor.execute("SELECT SUM(duration) FROM overtime_records WHERE user_id = ? AND overtime_type = 'weekend' AND date >= ? AND date < ?", (g.user_id, m_start, m_end))
+            weekend_total = cursor.fetchone()[0] or 0
+            cursor.execute("SELECT COUNT(*) FROM overtime_records WHERE user_id = ? AND date >= ? AND date < ?", (g.user_id, m_start, m_end))
+            total_count = cursor.fetchone()[0]
+        else:
+            weekday_total = 0
+            weekend_total = 0
+            total_count = 0
     else:
         cursor.execute("SELECT SUM(duration) FROM overtime_records WHERE user_id = ? AND overtime_type = 'weekday'", (g.user_id,))
         weekday_total = cursor.fetchone()[0] or 0
@@ -1275,8 +1657,9 @@ EXPENSE_CATEGORIES = ['燃气费', '电费', '话费', '网费', '香烟', '菜�
 @app.route('/api/expenses', methods=['GET'])
 @login_required
 def get_expenses():
-    page = request.args.get('page', 1, type=int)
-    page_size = request.args.get('page_size', 10, type=int)
+    page, page_size = clamp_pagination(
+        request.args.get('page', 1, type=int),
+        request.args.get('page_size', 5, type=int))
     month = request.args.get('month', '', type=str)
     category = request.args.get('category', '', type=str)
     offset = (page - 1) * page_size
@@ -1284,8 +1667,10 @@ def get_expenses():
     conditions = ['user_id = ?']
     params = [g.user_id]
     if month:
-        conditions.append("strftime('%Y-%m', date) = ?")
-        params.append(month)
+        m_start, m_end = _month_to_range(month)
+        if m_start and m_end:
+            conditions.append('date >= ? AND date < ?')
+            params.extend([m_start, m_end])
     if category:
         conditions.append('category = ?')
         params.append(category)
@@ -1297,7 +1682,7 @@ def get_expenses():
     cursor.execute(f'SELECT COUNT(*) FROM expenses WHERE {where_clause}', params)
     total = cursor.fetchone()[0]
 
-    cursor.execute(f'SELECT * FROM expenses WHERE {where_clause} ORDER BY date DESC, id DESC LIMIT ? OFFSET ?',
+    cursor.execute(f'SELECT id, category, amount, remark, date FROM expenses WHERE {where_clause} ORDER BY date DESC, id DESC LIMIT ? OFFSET ?',
                    params + [page_size, offset])
     records = [dict(row) for row in cursor.fetchall()]
 
@@ -1317,7 +1702,10 @@ def export_expenses():
         cursor = db.cursor()
 
         if request.method == 'POST':
-            data = request.get_json() or {}
+            data, err = safe_get_json()
+            if err:
+                return err
+            data = data or {}
             ids = data.get('ids', [])
             if not ids:
                 return jsonify({'error': 'ids不能为空'}), 400
@@ -1331,32 +1719,37 @@ def export_expenses():
             conditions = ['user_id = ?']
             params = [g.user_id]
             if month:
-                conditions.append("strftime('%Y-%m', date) = ?")
-                params.append(month)
+                m_start, m_end = _month_to_range(month)
+                if m_start and m_end:
+                    conditions.append('date >= ? AND date < ?')
+                    params.extend([m_start, m_end])
             if category:
                 conditions.append('category = ?')
                 params.append(category)
             where_clause = ' AND '.join(conditions)
-            cursor.execute(f"SELECT id, category, amount, remark, date FROM expenses WHERE {where_clause} ORDER BY date DESC", params)
-            rows = cursor.fetchall()
+            cursor.execute(f"SELECT id, category, amount, remark, date FROM expenses WHERE {where_clause} ORDER BY date DESC LIMIT 10000", params)
+            rows = _fetchall_dicts(cursor)
 
         if not rows:
-            return jsonify({'error': '没有数据可导出'}), 400
+            return jsonify({'error': '没有数据可导出'}), 404
 
-        output = io.BytesIO()
-        # 使用 GBK 编码（Windows中文Excel原生支持，无需BOM）
-        stream_writer = codecs.getwriter('gbk')(output)
-        writer = csv.writer(stream_writer, lineterminator='\n')
-        writer.writerow(['ID', '分类', '金额', '日期', '备注'])
-        for r in rows:
-            writer.writerow([r['id'], r['category'], float(r['amount']), r['date'], r['remark'] or ''])
+        def generate_csv():
+            # 流式生成 CSV，内存占用 = 单行大小而非全部数据
+            output = io.StringIO()
+            writer = csv.writer(output, lineterminator='\n')
+            writer.writerow(['ID', '分类', '金额', '日期', '备注'])
+            for r in rows:
+                line = output.getvalue()
+                yield line.encode('gbk')
+                output.seek(0)
+                output.truncate(0)
+                writer.writerow([r['id'], r['category'], float(r['amount']), r['date'], r['remark'] or ''])
+            final = output.getvalue()
+            if final:
+                yield final.encode('gbk')
 
-        csv_data = output.getvalue()
-        output.close()
-
-        response = make_response(csv_data)
-        response.headers['Content-Type'] = 'text/csv;charset=gbk'
-        safe_filename = f"expense_record_{datetime.utcnow().strftime('%Y%m%d')}.csv"
+        safe_filename = f"expense_record_{datetime.now(timezone.utc).strftime('%Y%m%d')}.csv"
+        response = Response(generate_csv(), mimetype='text/csv;charset=gbk')
         response.headers['Content-Disposition'] = f"attachment; filename=\"{safe_filename}\""
         return response
     except Exception as e:
@@ -1388,43 +1781,47 @@ def export_kiwi_sales():
             params.append(f'%{phone}%')
         
         if year:
-            conditions.append("strftime('%Y', order_date) = ?")
-            params.append(year)
+            yr_start, yr_end = _year_to_range(year)
+            if yr_start and yr_end:
+                conditions.append("order_date >= ? AND order_date < ?")
+                params.extend([yr_start, yr_end])
         
         where_clause = 'WHERE ' + ' AND '.join(conditions)
         
         cursor.execute(f'''SELECT id, customer_name, phone, address, order_date, status, tracking_number, remark, quantity, payment_amount 
-                          FROM kiwi_sales {where_clause} ORDER BY created_at DESC''', params)
-        rows = cursor.fetchall()
+                          FROM kiwi_sales {where_clause} ORDER BY created_at DESC LIMIT 10000''', params)
+        rows = _fetchall_dicts(cursor)
         
         if not rows:
-            return jsonify({'error': '没有数据可导出'}), 400
-        
-        output = io.BytesIO()
-        stream_writer = codecs.getwriter('gbk')(output)
-        writer = csv.writer(stream_writer, lineterminator='\n')
-        writer.writerow(['序号', '客户名', '电话', '地址', '接单日期', '状态', '运单号', '备注', '数量', '支付金额'])
-        
-        for idx, r in enumerate(rows):
-            writer.writerow([
-                idx + 1,
-                r['customer_name'],
-                r['phone'],
-                r['address'],
-                r['order_date'] or '',
-                r['status'] or '未发货',
-                r['tracking_number'] or '',
-                r['remark'] or '',
-                r['quantity'] or 0,
-                (r['payment_amount'] or 0)
-            ])
-        
-        csv_data = output.getvalue()
-        output.close()
-        
-        response = make_response(csv_data)
-        response.headers['Content-Type'] = 'text/csv;charset=gbk'
-        safe_filename = f"kiwi_sales_{datetime.utcnow().strftime('%Y%m%d')}.csv"
+            return jsonify({'error': '没有数据可导出'}), 404
+
+        def generate_csv():
+            output = io.StringIO()
+            writer = csv.writer(output, lineterminator='\n')
+            writer.writerow(['序号', '客户名', '电话', '地址', '接单日期', '状态', '运单号', '备注', '数量', '支付金额'])
+            for idx, r in enumerate(rows):
+                line = output.getvalue()
+                yield line.encode('gbk')
+                output.seek(0)
+                output.truncate(0)
+                writer.writerow([
+                    idx + 1,
+                    r['customer_name'],
+                    r['phone'],
+                    r['address'],
+                    r['order_date'] or '',
+                    r['status'] or '未发货',
+                    r['tracking_number'] or '',
+                    r['remark'] or '',
+                    r['quantity'] or 0,
+                    (r['payment_amount'] or 0)
+                ])
+                yield output.getvalue().encode('gbk')
+                output.seek(0)
+                output.truncate(0)
+
+        safe_filename = f"kiwi_sales_{datetime.now(timezone.utc).strftime('%Y%m%d')}.csv"
+        response = Response(stream_with_context(generate_csv()), mimetype='text/csv;charset=gbk')
         response.headers['Content-Disposition'] = f"attachment; filename=\"{safe_filename}\""
         return response
     except Exception as e:
@@ -1433,7 +1830,9 @@ def export_kiwi_sales():
 @app.route('/api/expenses', methods=['POST'])
 @login_required
 def add_expense():
-    data = request.get_json()
+    data, err = safe_get_json()
+    if err:
+        return err
     category = data.get('category', '').strip()
     amount = data.get('amount')
     remark = data.get('remark', '').strip()
@@ -1454,19 +1853,26 @@ def add_expense():
         return jsonify({'error': '金额格式错误'}), 400
     if not date:
         return jsonify({'error': '请选择日期'}), 400
+    date_err = validate_date(date)
+    if date_err:
+        return date_err
 
     db = get_db()
     cursor = db.cursor()
     cursor.execute('INSERT INTO expenses (category, amount, remark, date, user_id) VALUES (?, ?, ?, ?, ?)',
                    (category, amount, remark, date, g.user_id))
-    db.commit()
+    err = safe_commit(db)
+    if err:
+        return err
     return jsonify({'message': '添加成功', 'id': cursor.lastrowid}), 201
 
 
 @app.route('/api/expenses/<int:expense_id>', methods=['PUT'])
 @login_required
 def update_expense(expense_id):
-    data = request.get_json()
+    data, err = safe_get_json()
+    if err:
+        return err
     category = data.get('category', '').strip()
     amount = data.get('amount')
     remark = data.get('remark', '').strip()
@@ -1483,6 +1889,9 @@ def update_expense(expense_id):
         return jsonify({'error': '金额格式错误'}), 400
     if not date:
         return jsonify({'error': '请选择日期'}), 400
+    date_err = validate_date(date)
+    if date_err:
+        return date_err
 
     db = get_db()
     cursor = db.cursor()
@@ -1490,7 +1899,9 @@ def update_expense(expense_id):
                    (category, amount, remark, date, expense_id, g.user_id))
     if cursor.rowcount == 0:
         return jsonify({'error': '记录不存在'}), 404
-    db.commit()
+    err = safe_commit(db)
+    if err:
+        return err
     return jsonify({'message': '更新成功'})
 
 
@@ -1502,23 +1913,31 @@ def delete_expense(expense_id):
     cursor.execute('DELETE FROM expenses WHERE id=? AND user_id=?', (expense_id, g.user_id))
     if cursor.rowcount == 0:
         return jsonify({'error': '记录不存在'}), 404
-    db.commit()
+    err = safe_commit(db)
+    if err:
+        return err
     return jsonify({'message': '删除成功'})
 
 
 @app.route('/api/expenses/batch-delete', methods=['POST'])
 @login_required
 def batch_delete_expenses():
-    data = request.get_json()
+    data, err = safe_get_json()
+    if err:
+        return err
     ids = data.get('ids', [])
     if not ids or not isinstance(ids, list):
         return jsonify({'error': '请提供要删除的记录ID列表'}), 400
+    if len(ids) > 100:
+        return jsonify({'error': '单次删除不能超过100条记录'}), 400
     db = get_db()
     cursor = db.cursor()
     placeholders = ','.join(['?'] * len(ids))
     cursor.execute(f'DELETE FROM expenses WHERE id IN ({placeholders}) AND user_id=?', ids + [g.user_id])
     deleted = cursor.rowcount
-    db.commit()
+    err = safe_commit(db)
+    if err:
+        return err
     return jsonify({'message': f'成功删除 {deleted} 条记录', 'deleted': deleted})
 
 
@@ -1534,21 +1953,27 @@ def get_expenses_stats():
     cursor = db.cursor()
 
     if month:
-        conditions = ['user_id = ?', "strftime('%Y-%m', date) = ?"]
-        params = [g.user_id, month]
-    elif year:
-        if start_month and end_month:
-            conditions = ['user_id = ?', "strftime('%Y', date) = ?", "strftime('%m', date) >= ?", "strftime('%m', date) <= ?"]
-            params = [g.user_id, year, start_month, end_month]
-        elif start_month:
-            conditions = ['user_id = ?', "strftime('%Y', date) = ?", "strftime('%m', date) >= ?"]
-            params = [g.user_id, year, start_month]
-        elif end_month:
-            conditions = ['user_id = ?', "strftime('%Y', date) = ?", "strftime('%m', date) <= ?"]
-            params = [g.user_id, year, end_month]
+        m_start, m_end = _month_to_range(month)
+        if m_start and m_end:
+            conditions = ['user_id = ?', 'date >= ?', 'date < ?']
+            params = [g.user_id, m_start, m_end]
         else:
-            conditions = ['user_id = ?', "strftime('%Y', date) = ?"]
-            params = [g.user_id, year]
+            conditions = ['user_id = ?']
+            params = [g.user_id]
+    elif year:
+        yr_start, yr_end = _year_to_range(year)
+        if yr_start and yr_end:
+            conditions = ['user_id = ?', 'date >= ?', 'date < ?']
+            params = [g.user_id, yr_start, yr_end]
+            if start_month:
+                conditions.append('substr(date, 6, 2) >= ?')
+                params.append(int(start_month))
+            if end_month:
+                conditions.append('substr(date, 6, 2) <= ?')
+                params.append(int(end_month))
+        else:
+            conditions = ['user_id = ?']
+            params = [g.user_id]
     else:
         conditions = ['user_id = ?']
         params = [g.user_id]
@@ -1583,19 +2008,21 @@ def get_expenses_stats_monthly():
     params = [g.user_id]
 
     if year:
-        conditions.append("strftime('%Y', date) = ?")
-        params.append(year)
+        yr_start, yr_end = _year_to_range(year)
+        if yr_start and yr_end:
+            conditions.append('date >= ? AND date < ?')
+            params.extend([yr_start, yr_end])
     if start_month:
-        conditions.append("strftime('%m', date) >= ?")
-        params.append(start_month)
+        conditions.append('substr(date, 6, 2) >= ?')
+        params.append(int(start_month))
     if end_month:
-        conditions.append("strftime('%m', date) <= ?")
-        params.append(end_month)
+        conditions.append('substr(date, 6, 2) <= ?')
+        params.append(int(end_month))
 
     where_clause = ' AND '.join(conditions)
 
     cursor.execute(
-        f"SELECT strftime('%m', date) as month, SUM(amount) as total "
+        f"SELECT CAST(substr(date, 6, 2) AS INTEGER) as month, SUM(amount) as total "
         f"FROM expenses WHERE {where_clause} GROUP BY month ORDER BY month",
         params
     )
@@ -1615,4 +2042,4 @@ if __name__ == '__main__':
     print("  访问地址: http://localhost:5001")
     print("  按 Ctrl+C 停止服务")
     print("=" * 60)
-    app.run(host='0.0.0.0', port=5001, debug=False)
+    app.run(host='0.0.0.0', port=5001, debug=False, threaded=True)

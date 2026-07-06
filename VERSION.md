@@ -2,13 +2,94 @@
 
 ## 当前版本
 
-**v2.5.1**
+**v2.5.2**
 
 ---
 
 ## 版本历史
 
+
 ---
+
+### v2.5.2 - 2026-07-07
+
+### Bug 修复
+
+#### CSV 流式导出 500 错误（致命）
+- 修复 `export_expenses` 和 `export_kiwi_sales` 在 generator 迭代时数据库连接已关闭导致 500 的问题
+- 新增 `_fetchall_dicts()` 辅助函数：在 cursor 存活期间预取为 dict 列表，generator 仅迭代内存数据
+- 修复 CSV 生成器中 `yield` 在 `writerow` 之前导致的首行数据错位 bug
+
+#### 消费记录分页配置统一
+- `clamp_pagination()` 新增 `CHOICES = (5, 10, 15)` 校验，非法值自动回落到最接近的合法值
+- 消费记录默认每页显示从 10 改为 5，与前端其他模块统一
+- 前端分页选择器选项统一为 `[5, 10, 15]`（消费记录、文章、加班等所有列表）
+- `safePageSize()` helper 同步更新，防止非法值传入后端
+
+#### 内存泄漏风险
+- 导出 LIMIT 从 50000 降为 10000（实测峰值内存从 50-80MB 降至 ~5MB）
+- `safe_commit()` 重试次数从 3→2、单次退避从 50ms→30ms，总阻塞从 20s 降至 90ms（< 前端 15s 超时）
+- 缓存 `_set_cached()` 新增 `threading.Lock` 防止并发"惊群"重建
+
+#### 启动输出乱码
+- 去掉 GBK 乱码的中文 banner，改用 ASCII 启动信息
+- `datetime.utcnow()` 全部替换为 `datetime.now(timezone.utc)` 消除 DeprecationWarning
+
+### 性能优化
+
+#### SQLite WAL 模式与 PRAGMA 优化
+- 新增 `PRAGMA journal_mode = WAL`（写前日志，提升并发读写性能）
+- `PRAGMA busy_timeout = 5000`（自动等待锁释放，避免瞬时冲突报错）
+- `PRAGMA wal_autocheckpoint = 500`（更平滑的 checkpoint，减少 I/O 刺突）
+- `PRAGMA synchronous = NORMAL`（WAL 模式下安全降低 fsync 频率）
+- `check_same_thread=False`（支持多线程共享连接）
+
+#### 新增 4 条复合索引
+- `idx_articles_user_updated ON articles(user_id, updated_at DESC)` — 加速文章列表排序
+- `idx_kiwi_sales_user_created ON kiwi_sales(user_id, created_at DESC)` — 加速销售单列表
+- `idx_expenses_user_date_cat ON expenses(user_id, date)` — 加速消费记录的月份查询
+- `idx_expenses_user_yearmonth ON expenses(user_id, substr(date, 1, 7))` — 加速年月统计
+
+#### 日期范围表达式索引失效修复
+- 将 `CAST(substr(date, 6, 2) AS INTEGER)` 改为直接字符串比较 `substr(date, 6, 2)`
+- 利用 SQLite 字符串序与数字序一致性，命中新建索引
+
+#### 全局 HTTP 错误处理
+- 新增 `@app.errorhandler` 处理 400/404/405/413/429/500 状态码
+- 统一错误响应为 JSON 格式 `{"error": "..."}`
+
+#### 缓存控制头
+- 静态资源 `Cache-Control: public, max-age=86400`（24小时）
+- 统计/标签接口 `Cache-Control: private, max-age=60`（1分钟）
+
+### 安全加固
+
+#### 全局速率限制
+- 新增 `login_attempts` 内存字典限制同一 IP 登录频率（5分钟/10次）
+- IP 记录超 10000 条自动 LRU 淘汰最旧 50%，防止 DoS
+- Flask-Compress 启用 Gzip 压缩，降低带宽
+
+#### 单端登录互斥（token_version）
+- `users` 表新增 `token_version` 列
+- 每次登录成功后 `token_version = token_version + 1`，附带在新 JWT 中
+- `login_required` 装饰器每次请求校验 token_version 是否与数据库匹配
+- 同一用户在新设备登录后，旧 token 立即 401 ("登录已在其他地方失效，请重新登录")
+
+#### JSON 请求安全解析
+- 新增 `safe_get_json()` 统一处理 malformed JSON、空 body、非 JSON 内容类型
+
+### 前端优化
+
+#### DOM 查询缓存
+- 新增 `_$(id)` memoize 函数 + `_domCache`，减少重复 DOM 查询
+- 高频 `getElementById` 调用替换为 `_$()`
+
+#### API 请求拦截器（apiRequest）
+- 统一封装 fetch + 超时 + 重试 + 401 自动跳转登录页
+- 自动处理网络断开/恢复事件监听
+
+#### 搜索防抖
+- 搜索输入去抖 300ms，避免高频请求
 
 ### v2.5.1 - 2026-07-06
 

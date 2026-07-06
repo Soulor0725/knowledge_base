@@ -1877,6 +1877,93 @@
     <script>
         const API_URL = '/api';
         console.log('API_URL initialized:', API_URL);
+
+        // DOM query cache: memoizes getElementById results
+        const _domCache = Object.create(null);
+        function _$(id) {
+            let el = _domCache[id];
+            if (!el || !el.isConnected) {
+                el = document.getElementById(id);
+                if (el) _domCache[id] = el;
+            }
+            return el;
+        }
+        function _clearDomCache() { for (const k in _domCache) delete _domCache[k]; }
+
+        async function fetchWithTimeout(url, options = {}, timeout = 15000) {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), timeout);
+            try {
+                const response = await fetch(url, { ...options, signal: controller.signal });
+                return response;
+            } catch (err) {
+                if (err.name === 'AbortError') {
+                    throw new Error('请求超时，请检查网络连接');
+                }
+                throw err;
+            } finally {
+                clearTimeout(timer);
+            }
+        }
+
+        /**
+         * 统一API请求封装：自动处理超时、重试、401跳转、错误解析
+         * @param {string} url
+         * @param {object} options - fetch options
+         * @param {number} maxRetries - 最大重试次数（默认2）
+         * @param {number} timeout - 超时毫秒（默认15000）
+         * @returns {Promise<object>} 解析后的JSON数据
+         */
+        async function apiRequest(url, options = {}, maxRetries = 2, timeout = 15000) {
+            let lastError;
+            for (let attempt = 0; attempt <= maxRetries; attempt++) {
+                try {
+                    const response = await fetchWithTimeout(url, options, timeout);
+
+                    if (response.status === 401) {
+                        localStorage.removeItem('token');
+                        localStorage.removeItem('user');
+                        window.location.hash = '#/login';
+                        throw new Error('登录已过期，请重新登录');
+                    }
+
+                    const text = await response.text();
+                    let data;
+                    try {
+                        data = JSON.parse(text);
+                    } catch (e) {
+                        data = { error: text || '服务器响应格式错误' };
+                    }
+
+                    if (!response.ok) {
+                        throw new Error(data.error || `请求失败(${response.status})`);
+                    }
+                    return data;
+                } catch (error) {
+                    lastError = error;
+                    // 不重试的情况：401、403、404、AbortError(超时)
+                    if (error.message.includes('登录已过期') ||
+                        error.message.includes('请求超时') ||
+                        error.message.includes('请求失败(403') ||
+                        error.message.includes('请求失败(404')) {
+                        break;
+                    }
+                    if (attempt < maxRetries) {
+                        await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
+                    }
+                }
+            }
+            throw lastError;
+        }
+
+        /** 安全化分页参数 */
+        function safePage(p) { return Math.max(1, parseInt(p) || 1); }
+        function safePageSize(ps) { const v = parseInt(ps); const CHOICES=[5,10,15]; if (CHOICES.includes(v)) return v; return CHOICES.reduce((a,b) => Math.abs(b-v) < Math.abs(a-v) ? b : a); }
+
+        /** 网络状态监听 */
+        window.addEventListener('offline', () => console.warn('[网络] 已断开'));
+        window.addEventListener('online', () => console.log('[网络] 已恢复'));
+
         let currentCategory = null;
         let currentTag = null;
         let editingId = null;
@@ -1901,7 +1988,7 @@
         let currentView = 'all'; // all, favorites
 
         // 检查用户登录状态
-        function checkAuth() {
+        async function checkAuth() {
             const token = localStorage.getItem('token');
             const userData = localStorage.getItem('user');
             if (token && userData) {
@@ -1920,9 +2007,7 @@
                         <button class="btn btn-secondary" onclick="openProfileModal()">编辑资料</button>
                         <button class="btn btn-secondary" onclick="logout()">退出</button>
                     `;
-                    loadArticles();
-                    loadCategories();
-                    loadStats();
+                    await Promise.all([loadArticles(), loadCategories(), loadStats()]);
                 } catch (error) {
                     console.error('解析用户数据失败:', error);
                     localStorage.removeItem('token');
@@ -1953,7 +2038,8 @@
                 `;
                 // 清空分类和标签
                 document.getElementById('categoryList').innerHTML = '';
-                document.getElementById('tagCloud').innerHTML = '';
+                const tagCloud = document.getElementById('tagCloud');
+                if (tagCloud) tagCloud.innerHTML = '';
                 // 清空统计数据
                 document.getElementById('statArticles').textContent = '0';
                 document.getElementById('statFavorites').textContent = '0';
@@ -1963,6 +2049,7 @@
 
         // 打开登录模态框
         function openLoginModal() {
+            document.body.style.overflow = 'hidden';
             document.getElementById('loginModal').classList.add('active');
         }
 
@@ -1998,7 +2085,7 @@
             if (!password) { alert('请输入密码'); return; }
 
             try {
-                const response = await fetch(`${API_URL}/auth/login`, {
+                const response = await fetchWithTimeout(`${API_URL}/auth/login`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ username, password })
@@ -2034,7 +2121,7 @@
             if (password.length < 6) { alert('密码至少6个字符'); return; }
 
             try {
-                const response = await fetch(`${API_URL}/auth/register`, {
+                const response = await fetchWithTimeout(`${API_URL}/auth/register`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ username, password, name })
@@ -2139,7 +2226,7 @@
             
             try {
                 console.log('Updating profile with:', { name, avatar: avatar ? 'base64 data' : 'empty' });
-                const response = await fetch(`${API_URL}/auth/me`, {
+                const response = await fetchWithTimeout(`${API_URL}/auth/me`, {
                     method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
@@ -2198,7 +2285,7 @@
         // 加载猕猴桃销售订单数量
         async function loadKiwiSalesCount() {
             try {
-                const response = await fetch(`${API_URL}/kiwi-sales?page=1&page_size=1`, {
+                const response = await fetchWithTimeout(`${API_URL}/kiwi-sales?page=1&page_size=1`, {
                     headers: getAuthHeaders()
                 });
                 
@@ -2216,13 +2303,15 @@
                 }
             } catch (error) {
                 console.error('加载猕猴桃销售订单数量失败:', error);
+                const el = document.getElementById('kiwiSalesCount');
+                if (el) el.textContent = '加载失败';
             }
         }
 
         // 加载加班记录数量
         async function loadOvertimeCount() {
             try {
-                const response = await fetch(`${API_URL}/overtime?page=1&page_size=1`, {
+                const response = await fetchWithTimeout(`${API_URL}/overtime?page=1&page_size=1`, {
                     headers: getAuthHeaders()
                 });
                 if (!response.ok) return;
@@ -2232,6 +2321,8 @@
                 }
             } catch (error) {
                 console.error('加载加班记录数量失败:', error);
+                const el = document.getElementById('overtimeCount');
+                if (el) el.textContent = '加载失败';
             }
         }
 
@@ -2258,7 +2349,7 @@
                     exportUrl += '?' + queryParams.join('&');
                 }
                 
-                const response = await fetch(exportUrl, {
+                const response = await fetchWithTimeout(exportUrl, {
                     headers: getAuthHeaders()
                 });
                 
@@ -2313,6 +2404,10 @@
             loadExpenseCount();
             
             // 点击页面其他地方关闭右键菜单
+            function closeArticleContextMenu(e) {
+                const menu = document.getElementById('articleContextMenu');
+                if (menu) menu.style.display = 'none';
+            }
             document.addEventListener('click', closeArticleContextMenu);
             
             // 为右键菜单添加悬停效果
@@ -2346,7 +2441,7 @@
             
             console.log('请求URL:', url);
             try {
-                const response = await fetch(url, {
+                const response = await fetchWithTimeout(url, {
                     headers: getAuthHeaders()
                 });
                 
@@ -2374,7 +2469,7 @@
                 console.error('错误详情:', error.message);
                 // 避免无限循环，不在这里调用checkAuth()
                 // 显示错误信息
-                const articleList = document.getElementById('articleList');
+                const articleList = _$('articleList');
                 articleList.innerHTML = `
                     <div class="empty-state">
                         <h3>加载失败</h3>
@@ -2386,10 +2481,21 @@
         }
 
         function renderArticles(articles) {
-            const articleList = document.getElementById('articleList');
+            const articleList = _$('articleList');
             renderedArticlesCache = articles || [];
             if (articles.length === 0) {
-                articleList.innerHTML = `<div class="empty-state-card"><i class="fa fa-inbox"></i><p>暂无${articleTerm(currentCategory)}，点击「新增」开始创建</p></div>`;
+                if (currentPage > 1) {
+                    currentPage--;
+                    loadArticles();
+                    return;
+                }
+                if (currentView === 'search') {
+                    articleList.innerHTML = `<div class="empty-state-card"><i class="fa fa-search"></i><p>未找到匹配的${articleTerm(currentCategory)}</p></div>`;
+                } else {
+                    articleList.innerHTML = `<div class="empty-state-card"><i class="fa fa-inbox"></i><p>暂无${articleTerm(currentCategory)}，点击「新增」开始创建</p></div>`;
+                }
+                _clearDomCache();
+                updateSelectedCount();
                 return;
             }
             
@@ -2469,8 +2575,9 @@
                     ${renderPagination()}
                 </div>
             `;
+            updateSelectedCount();
         }
-
+        
         function renderPagination() {
             const totalPages = Math.ceil(totalArticles / pageSize);
 
@@ -2527,31 +2634,10 @@
         }
         function escapeHtml(text) { if (text == null) return ''; return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
         // Ensure marked never returns HTML for code blocks; force escaping and language prefix.
-        (function() {
-            const origSetOptions = marked.setOptions.bind(marked);
-            marked.setOptions = function(opts) {
-                opts = opts || {};
-                opts.highlight = function(code, lang) { return escapeHtml(code); };
-                opts.langPrefix = opts.langPrefix || 'language-';
-                return origSetOptions(opts);
-            };
-        })();
-        function getArticleSummary(content) {
-            // 移除代码块
-            let summary = content.replace(/```[\s\S]*?```/g, '');
-            // 移除行内代码
-            summary = summary.replace(/`[^`]+`/g, '');
-            // 移除 Markdown 标记
-            summary = summary.replace(/#{1,6}\s+/g, ''); // 标题
-            summary = summary.replace(/\*\*|__/g, ''); // 粗体
-            summary = summary.replace(/\*|_/g, ''); // 斜体
-            summary = summary.replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1'); // 链接
-            summary = summary.replace(/!\[([^\]]*)\]\([^\)]+\)/g, ''); // 图片
-            summary = summary.replace(/\n/g, ' '); // 换行符
-            // 截取前200个字符
-            return summary.length > 200 ? summary.substring(0, 200) + '...' : summary;
-        }
-
+        marked.setOptions({
+            highlight: function(code, lang) { return escapeHtml(code); },
+            langPrefix: 'language-'
+        });
         // 文章导航函数
         async function navigateArticle(currentId, direction) {
             console.log('=== navigateArticle called ===');
@@ -2567,7 +2653,7 @@
                 const fullUrl = `${API_URL}/articles/navigate?current_id=${currentId}&direction=${direction}`;
                 console.log('Full URL:', fullUrl);
                 
-                const response = await fetch(fullUrl, {
+                const response = await fetchWithTimeout(fullUrl, {
                     headers: headers
                 });
                 
@@ -2656,7 +2742,7 @@
         async function toggleFavorite(id, event) {
             event.stopPropagation();
             try {
-                const response = await fetch(`${API_URL}/articles/${id}/favorite`, {
+                const response = await fetchWithTimeout(`${API_URL}/articles/${id}/favorite`, {
                     method: 'POST',
                     headers: getAuthHeaders()
                 });
@@ -2691,18 +2777,19 @@
             }
         }
         function handleSearch(event) {
-            // 处理按钮点击或回车键
-            if (!event || event.key === 'Enter') {
-                if (event) event.preventDefault();
-                const searchTerm = document.getElementById('searchInput').value.trim();
-                currentCategory = null;
-                currentTag = null;
+            if (event && event.key !== 'Enter') return;
+            if (event) event.preventDefault();
+            clearTimeout(window._searchDebounceTimer);
+            const searchTerm = document.getElementById('searchInput').value.trim();
+            currentCategory = null;
+            currentTag = null;
+            window._searchDebounceTimer = setTimeout(function() {
                 if (searchTerm) {
                     searchArticles(searchTerm);
                 } else {
                     loadArticles();
                 }
-            }
+            }, 300);
         }
 
         async function searchArticles(searchTerm) {
@@ -2710,7 +2797,7 @@
                 console.log('=== 搜索文章 ===');
                 console.log('搜索关键词:', searchTerm);
                 
-                const response = await fetch(`${API_URL}/articles?search=${encodeURIComponent(searchTerm)}&page=${currentPage}&page_size=${pageSize}`, {
+                const response = await fetchWithTimeout(`${API_URL}/articles?search=${encodeURIComponent(searchTerm)}&page=${currentPage}&page_size=${pageSize}`, {
                     headers: getAuthHeaders()
                 });
                 
@@ -2736,7 +2823,7 @@
                 renderPagination();
             } catch (error) { 
                 console.error('搜索失败:', error);
-                const articleList = document.getElementById('articleList');
+                const articleList = _$('articleList');
                 articleList.innerHTML = `
                     <div class="empty-state">
                         <h3>搜索失败</h3>
@@ -2769,7 +2856,7 @@
                 if (kiwiSalesYearSearch) {
                     url += `&year=${kiwiSalesYearSearch}`;
                 }
-                const response = await fetch(url, {
+                const response = await fetchWithTimeout(url, {
                     headers: getAuthHeaders()
                 });
                 if (!response.ok) throw new Error('加载销售数据失败');
@@ -2781,6 +2868,8 @@
                 renderKiwiSalesPagination();
             } catch (error) {
                 console.error('加载销售数据失败:', error);
+                const el = document.getElementById('kiwiSalesTableBody');
+                if (el) el.innerHTML = '<div class="empty-state-card"><i class="fa fa-exclamation-triangle"></i><p>加载失败，请刷新重试</p></div>';
             }
         }
         
@@ -3067,7 +3156,7 @@
             try {
                 const yearSelect = document.getElementById('kiwiReportYear');
                 const year = yearSelect ? yearSelect.value : new Date().getFullYear();
-                const response = await fetch(`${API_URL}/kiwi-sales-report?page=${kiwiReportPage}&page_size=${kiwiReportPageSize}&year=${year}`, {
+                const response = await fetchWithTimeout(`${API_URL}/kiwi-sales-report?page=${kiwiReportPage}&page_size=${kiwiReportPageSize}&year=${year}`, {
                     headers: getAuthHeaders()
                 });
                 if (!response.ok) throw new Error('加载报表失败');
@@ -3081,6 +3170,8 @@
                 renderKiwiReport();
             } catch (error) {
                 console.error('加载报表失败:', error);
+                const el = document.getElementById('kiwiReportStats');
+                if (el) el.innerHTML = '<div class="error-message">加载失败，请刷新重试</div>';
             }
         }
         
@@ -3264,7 +3355,7 @@
             }
             
             try {
-                const response = await fetch(`${API_URL}/kiwi-sales/batch-delete`, {
+                const response = await fetchWithTimeout(`${API_URL}/kiwi-sales/batch-delete`, {
                     method: 'POST',
                     headers: {
                         ...getAuthHeaders(),
@@ -3305,15 +3396,15 @@
                 const sale = kiwiSalesData.find(s => s.id === id);
                 if (sale) {
                     document.getElementById('kiwiSaleId').value = sale.id;
-                    document.getElementById('kiwiCustomerName').value = sale.customer_name;
-                    document.getElementById('kiwiPhone').value = sale.phone;
-                    document.getElementById('kiwiAddress').value = sale.address;
-                    document.getElementById('kiwiOrderDate').value = sale.order_date;
-                    document.getElementById('kiwiTrackingNumber').value = sale.tracking_number || '';
-                    document.getElementById('kiwiRemark').value = sale.remark || '';
+                    _$('kiwiCustomerName').value = sale.customer_name;
+                    _$('kiwiPhone').value = sale.phone;
+                    _$('kiwiAddress').value = sale.address;
+                    _$('kiwiOrderDate').value = sale.order_date;
+                    _$('kiwiTrackingNumber').value = sale.tracking_number || '';
+                    _$('kiwiRemark').value = sale.remark || '';
                     document.getElementById('kiwiStatus').value = sale.status || '未发货';
-                    document.getElementById('kiwiQuantity').value = sale.quantity || 0;
-                    document.getElementById('kiwiPaymentAmount').value = sale.payment_amount || 0.00;
+                    _$('kiwiQuantity').value = sale.quantity || 0;
+                    _$('kiwiPaymentAmount').value = sale.payment_amount || 0.00;
                     document.getElementById('kiwiSalesModalTitle').textContent = '编辑订单';
                 }
             }
@@ -3324,59 +3415,64 @@
         }
         
         async function saveKiwiSale(event) {
-            event.preventDefault();
+            if (window._submitting) return;
+            window._submitting = true;
+            try {
+                event.preventDefault();
             
             // 表单验证
-            const customerName = document.getElementById('kiwiCustomerName').value.trim();
-            const phone = document.getElementById('kiwiPhone').value.trim();
-            const address = document.getElementById('kiwiAddress').value.trim();
-            const orderDate = document.getElementById('kiwiOrderDate').value;
+            const customerName = _$('kiwiCustomerName').value.trim();
+            const phone = _$('kiwiPhone').value.trim();
+            const address = _$('kiwiAddress').value.trim();
+            const orderDate = _$('kiwiOrderDate').value;
             const status = document.getElementById('kiwiStatus').value;
-            const trackingNumber = document.getElementById('kiwiTrackingNumber').value.trim();
-            const remark = document.getElementById('kiwiRemark').value.trim();
-            const quantity = parseInt(document.getElementById('kiwiQuantity').value) || 0;
-            const paymentAmount = parseFloat(document.getElementById('kiwiPaymentAmount').value) || 0.00;
+            const trackingNumber = _$('kiwiTrackingNumber').value.trim();
+            const remark = _$('kiwiRemark').value.trim();
+            const quantity = parseInt(_$('kiwiQuantity').value);
+            if (isNaN(quantity) || quantity <= 0) { alert('数量必须大于0'); return; }
+            const paymentAmount = parseFloat(_$('kiwiPaymentAmount').value);
+            if (isNaN(paymentAmount) || paymentAmount < 0) { alert('金额不能为负数'); return; }
 
             // 客户名校验
             if (!customerName) {
                 alert('请输入客户名');
-                document.getElementById('kiwiCustomerName').focus();
+                _$('kiwiCustomerName').focus();
                 return;
             }
             if (customerName.length > 50) {
                 alert('客户名不能超过50个字符');
-                document.getElementById('kiwiCustomerName').focus();
+                _$('kiwiCustomerName').focus();
                 return;
             }
             
             // 电话校验
             if (!phone) {
                 alert('请输入电话号码');
-                document.getElementById('kiwiPhone').focus();
+                _$('kiwiPhone').focus();
                 return;
             }
             if (!/^\d{11}$/.test(phone)) {
                 alert('请输入有效的11位手机号码');
-                document.getElementById('kiwiPhone').focus();
+                _$('kiwiPhone').focus();
                 return;
             }
             
             // 地址校验
             if (!address) {
                 alert('请输入收货地址');
-                document.getElementById('kiwiAddress').focus();
+                _$('kiwiAddress').focus();
                 return;
             }
             if (address.length > 200) {
                 alert('地址不能超过200个字符');
-                document.getElementById('kiwiAddress').focus();
+                _$('kiwiAddress').focus();
                 return;
             }
             
             // 接单日期校验
             if (!orderDate) {
                 alert('请选择接单日期');
-                document.getElementById('kiwiOrderDate').focus();
+                _$('kiwiOrderDate').focus();
                 return;
             }
 
@@ -3386,7 +3482,7 @@
             // 运单号校验
             if (trackingNumber && trackingNumber.length > 50) {
                 alert('运单号不能超过50个字符');
-                document.getElementById('kiwiTrackingNumber').focus();
+                _$('kiwiTrackingNumber').focus();
                 return;
             }
             
@@ -3407,7 +3503,7 @@
             try {
                 const url = id ? `${API_URL}/kiwi-sales/${id}` : `${API_URL}/kiwi-sales`;
                 const method = id ? 'PUT' : 'POST';
-                const response = await fetch(url, {
+                const response = await fetchWithTimeout(url, {
                     method,
                     headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
                     body: JSON.stringify(data)
@@ -3420,6 +3516,9 @@
             } catch (error) {
                 alert(error.message);
             }
+            } finally {
+                window._submitting = false;
+            }
         }
         
         function editKiwiSale(id) {
@@ -3429,7 +3528,7 @@
         async function deleteKiwiSale(id) {
             if (!confirm('确定要删除这条订单吗？')) return;
             try {
-                const response = await fetch(`${API_URL}/kiwi-sales/${id}`, {
+                const response = await fetchWithTimeout(`${API_URL}/kiwi-sales/${id}`, {
                     method: 'DELETE',
                     headers: getAuthHeaders()
                 });
@@ -3454,7 +3553,7 @@
         let expenseData = [];
         let expenseTotal = 0;
         let expenseCurrentPage = 1;
-        let expensePageSize = 10;
+        let expensePageSize = 5;
         let expenseMonthFilter = '';
         let expenseCategoryFilter = '';
         let selectedExpenseIds = new Set();
@@ -3466,7 +3565,7 @@
                 let url = `${API_URL}/expenses?page=${expenseCurrentPage}&page_size=${expensePageSize}`;
                 if (expenseMonthFilter) url += `&month=${expenseMonthFilter}`;
                 if (expenseCategoryFilter) url += `&category=${encodeURIComponent(expenseCategoryFilter)}`;
-                const response = await fetch(url, { headers: getAuthHeaders() });
+                const response = await fetchWithTimeout(url, { headers: getAuthHeaders() });
                 if (!response.ok) throw new Error('加载失败');
                 const result = await response.json();
                 expenseData = result.records;
@@ -3479,6 +3578,8 @@
                 updateExpenseDeleteBtn();
             } catch (error) {
                 console.error('加载记账记录失败:', error);
+                const el = document.getElementById('expenseTableBody');
+                if (el) el.innerHTML = '<div class="empty-state-card"><i class="fa fa-exclamation-triangle"></i><p>加载失败，请刷新重试</p></div>';
             }
         }
 
@@ -3510,7 +3611,7 @@
             if (!el) return;
             const totalPages = Math.ceil(expenseTotal / expensePageSize);
             let html = `<div style="display:flex;align-items:center;gap:8px;margin-right:12px;"><span style="color:#94a3b8;font-size:12px;">每页</span><select onchange="changeExpensePageSize(this.value)" style="padding:4px 8px;border:1px solid rgba(148,163,184,0.2);border-radius:4px;background:rgba(30,41,59,0.8);color:#cbd5e1;font-size:12px;">`;
-            [10,20,50].forEach(s => { html += `<option value="${s}" ${expensePageSize===s?'selected':''}>${s}</option>`; });
+            [5,10,15].forEach(s => { html += `<option value="${s}" ${expensePageSize===s?'selected':''}>${s}</option>`; });
             html += `</select><span style="color:#94a3b8;font-size:12px;">条</span></div>`;
             if (totalPages > 1) {
                 const showPages = 5;
@@ -3617,15 +3718,15 @@
             document.getElementById('expenseForm').reset();
             document.getElementById('expenseId').value = '';
             document.getElementById('expenseModalTitle').textContent = '新增消费记录';
-            document.getElementById('expenseDate').value = new Date().toISOString().slice(0, 10);
+            _$('expenseDate').value = new Date().toISOString().slice(0, 10);
             if (id) {
                 const r = expenseData.find(x => x.id === id);
                 if (r) {
                     document.getElementById('expenseId').value = r.id;
-                    document.getElementById('expenseCategory').value = r.category;
-                    document.getElementById('expenseAmount').value = r.amount;
-                    document.getElementById('expenseDate').value = r.date;
-                    document.getElementById('expenseRemark').value = r.remark || '';
+                    _$('expenseCategory').value = r.category;
+                    _$('expenseAmount').value = r.amount;
+                    _$('expenseDate').value = r.date;
+                    _$('expenseRemark').value = r.remark || '';
                     document.getElementById('expenseModalTitle').textContent = '编辑消费记录';
                 }
             }
@@ -3636,13 +3737,16 @@
         }
 
         async function saveExpense(event) {
-            event.preventDefault();
-            const id = document.getElementById('expenseId').value;
+            if (window._submitting) return;
+            window._submitting = true;
+            try {
+                event.preventDefault();
+                const id = document.getElementById('expenseId').value;
             const data = {
-                category: document.getElementById('expenseCategory').value,
-                amount: parseFloat(document.getElementById('expenseAmount').value),
-                date: document.getElementById('expenseDate').value,
-                remark: document.getElementById('expenseRemark').value.trim()
+                category: _$('expenseCategory').value,
+                amount: parseFloat(_$('expenseAmount').value),
+                date: _$('expenseDate').value,
+                remark: _$('expenseRemark').value.trim()
             };
             if (!data.category) { alert('请选择分类'); return; }
             if (!data.amount || data.amount <= 0) { alert('请输入有效金额'); return; }
@@ -3650,7 +3754,7 @@
             try {
                 const url = id ? `${API_URL}/expenses/${id}` : `${API_URL}/expenses`;
                 const method = id ? 'PUT' : 'POST';
-                const response = await fetch(url, {
+                const response = await fetchWithTimeout(url, {
                     method,
                     headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
                     body: JSON.stringify(data)
@@ -3659,9 +3763,13 @@
                 if (!response.ok) throw new Error(result.error || '保存失败');
                 closeExpenseModal();
                 loadExpenses();
+                loadExpenseCount();
                 alert(id ? '更新成功' : '添加成功');
             } catch (error) {
                 alert(error.message);
+            }
+            } finally {
+                window._submitting = false;
             }
         }
 
@@ -3672,7 +3780,7 @@
         async function deleteExpense(id) {
             if (!confirm('确定要删除这条消费记录吗？')) return;
             try {
-                const response = await fetch(`${API_URL}/expenses/${id}`, {
+                const response = await fetchWithTimeout(`${API_URL}/expenses/${id}`, {
                     method: 'DELETE',
                     headers: getAuthHeaders()
                 });
@@ -3680,6 +3788,7 @@
                 selectedExpenseIds.delete(id);
                 updateExpenseDeleteBtn();
                 loadExpenses();
+                loadExpenseCount();
                 alert('删除成功');
             } catch (error) {
                 alert(error.message);
@@ -3728,7 +3837,7 @@
             if (!confirm(`确定要删除选中的 ${selectedExpenseIds.size} 条记录吗？`)) return;
             try {
                 const ids = Array.from(selectedExpenseIds);
-                const response = await fetch(`${API_URL}/expenses/batch-delete`, {
+                const response = await fetchWithTimeout(`${API_URL}/expenses/batch-delete`, {
                     method: 'POST',
                     headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
                     body: JSON.stringify({ ids })
@@ -3738,16 +3847,20 @@
                 selectedExpenseIds.clear();
                 updateExpenseDeleteBtn();
                 loadExpenses();
+                loadExpenseCount();
                 alert(result.message);
             } catch (error) {
                 alert(error.message);
                 selectedExpenseIds.clear();
                 updateExpenseDeleteBtn();
                 loadExpenses();
+                loadExpenseCount();
             }
         }
 
         async function exportExpenses() {
+            const exportBtn = document.querySelector('button[onclick="exportExpenses()"]');
+            const originalText = exportBtn ? exportBtn.textContent : '';
             try {
                 let url = `${API_URL}/expenses/export`;
                 let method = 'GET';
@@ -3773,7 +3886,12 @@
                     if (!confirm(`确定要导出 ${expenseMonthFilter} 的消费记录吗？`)) return;
                 }
 
-                const response = await fetch(url, { method, headers, body });
+                if (exportBtn) {
+                    exportBtn.textContent = '导出中...';
+                    exportBtn.disabled = true;
+                }
+
+                const response = await fetchWithTimeout(url, { method, headers, body });
                 if (!response.ok) throw new Error('导出失败');
                 
                 // 处理文件下载
@@ -3797,15 +3915,25 @@
                 document.body.removeChild(a);
                 window.URL.revokeObjectURL(downloadUrl);
                 
+                // 恢复按钮
+                if (exportBtn) {
+                    exportBtn.textContent = originalText;
+                    exportBtn.disabled = false;
+                }
+
                 alert('导出成功！');
             } catch (error) {
+                if (exportBtn) {
+                    exportBtn.textContent = originalText;
+                    exportBtn.disabled = false;
+                }
                 alert(error.message);
             }
         }
 
         async function loadExpenseCount() {
             try {
-                const response = await fetch(`${API_URL}/expenses?page=1&page_size=1`, { headers: getAuthHeaders() });
+                const response = await fetchWithTimeout(`${API_URL}/expenses?page=1&page_size=1`, { headers: getAuthHeaders() });
                 if (!response.ok) return;
                 const data = await response.json();
                 if (data && data.total !== undefined) {
@@ -3813,6 +3941,8 @@
                 }
             } catch (error) {
                 console.error('加载记账记录数量失败:', error);
+                const el = document.getElementById('expenseCount');
+                if (el) el.textContent = '加载失败';
             }
         }
 
@@ -3876,7 +4006,7 @@
                 let url = `${API_URL}/expenses/stats?year=${year}`;
                 if (startMonth) url += `&start_month=${startMonth}`;
                 if (endMonth) url += `&end_month=${endMonth}`;
-                const response = await fetch(url, { headers: getAuthHeaders() });
+                const response = await fetchWithTimeout(url, { headers: getAuthHeaders() });
                 if (!response.ok) throw new Error('加载统计失败');
                 const data = await response.json();
                 data._year = year;
@@ -3888,6 +4018,8 @@
                 renderExpenseStatsTable(data);
             } catch (error) {
                 console.error('加载统计失败:', error);
+                const el = document.getElementById('expenseStatsCards');
+                if (el) el.innerHTML = '<div class="error-message">加载失败，请刷新重试</div>';
             }
         }
 
@@ -3948,7 +4080,7 @@
                 let url = `${API_URL}/expenses/stats/monthly?year=${data._year || new Date().getFullYear()}`;
                 if (data._startMonth) url += `&start_month=${data._startMonth}`;
                 if (data._endMonth) url += `&end_month=${data._endMonth}`;
-                const resp = await fetch(url, { headers: getAuthHeaders() });
+                const resp = await fetchWithTimeout(url, { headers: getAuthHeaders() });
                 if (!resp.ok) throw new Error('加载月度数据失败');
                 const mData = await resp.json();
                 const months = mData.months || [];
@@ -3988,7 +4120,7 @@
                 el.innerHTML = html;
             } catch (e) {
                 console.error('加载月度趋势失败:', e);
-                el.innerHTML = '';
+                el.innerHTML = '<div class="error-message">加载月度趋势失败</div>';
             }
         }
 
@@ -4094,7 +4226,7 @@
             try {
                 let url = `${API_URL}/overtime?page=${overtimeCurrentPage}&page_size=${overtimePageSize}`;
                 if (overtimeMonthFilter) url += `&month=${overtimeMonthFilter}`;
-                const response = await fetch(url, { headers: getAuthHeaders() });
+                const response = await fetchWithTimeout(url, { headers: getAuthHeaders() });
                 if (!response.ok) throw new Error('加载失败');
                 const result = await response.json();
                 overtimeData = result.records;
@@ -4102,12 +4234,14 @@
                 document.getElementById('overtimeCount').textContent = overtimeTotal;
                 renderOvertimeTable();
                 renderOvertimePagination();
-                loadOvertimeStats();
+                await loadOvertimeStats();
                 const selectAll = document.getElementById('selectAllOvertime');
                 if (selectAll) selectAll.checked = false;
                 updateDeleteSelectedBtn();
             } catch (error) {
                 console.error('加载加班记录失败:', error);
+                const el = document.getElementById('overtimeTableBody');
+                if (el) el.innerHTML = '<div class="empty-state-card"><i class="fa fa-exclamation-triangle"></i><p>加载失败，请刷新重试</p></div>';
             }
         }
 
@@ -4115,7 +4249,7 @@
             try {
                 let url = `${API_URL}/overtime/stats`;
                 if (overtimeMonthFilter) url += `?month=${overtimeMonthFilter}`;
-                const response = await fetch(url, { headers: getAuthHeaders() });
+                const response = await fetchWithTimeout(url, { headers: getAuthHeaders() });
                 if (!response.ok) return;
                 const stats = await response.json();
                 const statsEl = document.getElementById('overtimeStats');
@@ -4143,6 +4277,8 @@
                 }
             } catch (error) {
                 console.error('加载统计失败:', error);
+                const statsEl = document.getElementById('overtimeStats');
+                if (statsEl) statsEl.innerHTML = '<div class="error-message">加载统计失败</div>';
             }
         }
 
@@ -4214,9 +4350,9 @@
 
         function onOvertimeTypeChange() {
             isManualDuration = false;
-            const type = document.getElementById('overtimeType').value;
-            const startEl = document.getElementById('overtimeStartTime');
-            const endEl = document.getElementById('overtimeEndTime');
+            const type = _$('overtimeType').value;
+            const startEl = _$('overtimeStartTime');
+            const endEl = _$('overtimeEndTime');
             if (type === 'weekday') {
                 startEl.removeAttribute('min');
                 startEl.removeAttribute('max');
@@ -4235,10 +4371,10 @@
             if (isManualDuration) return;
             const hint = document.getElementById('overtimeDurationHint');
             if (hint) hint.textContent = '自动计算';
-            const type = document.getElementById('overtimeType').value;
-            const start = document.getElementById('overtimeStartTime').value;
-            const end = document.getElementById('overtimeEndTime').value;
-            const durationEl = document.getElementById('overtimeDuration');
+            const type = _$('overtimeType').value;
+            const start = _$('overtimeStartTime').value;
+            const end = _$('overtimeEndTime').value;
+            const durationEl = _$('overtimeDuration');
             if (!end) { durationEl.value = ''; return; }
             let diffMin;
             if (type === 'weekday') {
@@ -4364,7 +4500,7 @@
             const month = document.getElementById('overtimeMonthlyFilter').value;
             if (!month) return;
             try {
-                const response = await fetch(`${API_URL}/overtime/stats/monthly?month=${month}`, { headers: getAuthHeaders() });
+                const response = await fetchWithTimeout(`${API_URL}/overtime/stats/monthly?month=${month}`, { headers: getAuthHeaders() });
                 if (!response.ok) return;
                 const stats = await response.json();
                 const periodEl = document.getElementById('overtimeMonthlyPeriod');
@@ -4396,6 +4532,8 @@
                 }
             } catch (error) {
                 console.error('加载月度统计失败:', error);
+                const statsEl = document.getElementById('overtimeMonthlyStats');
+                if (statsEl) statsEl.innerHTML = '<div class="error-message">加载月度统计失败</div>';
             }
         }
 
@@ -4419,21 +4557,21 @@
             document.getElementById('overtimeForm').reset();
             document.getElementById('overtimeRecordId').value = '';
             document.getElementById('overtimeModalTitle').textContent = '新增加班记录';
-            document.getElementById('overtimeDuration').value = '';
+            _$('overtimeDuration').value = '';
             document.getElementById('overtimeDurationHint').textContent = '自动计算';
             onOvertimeTypeChange();
             if (id) {
                 const r = overtimeData.find(x => x.id === id);
                 if (r) {
                     document.getElementById('overtimeRecordId').value = r.id;
-                    document.getElementById('overtimeType').value = r.overtime_type;
-                    document.getElementById('overtimeDate').value = r.date;
-                    document.getElementById('overtimeStartTime').value = r.start_time;
-                    document.getElementById('overtimeEndTime').value = r.end_time;
-                    document.getElementById('overtimeRemark').value = r.remark || '';
+                    _$('overtimeType').value = r.overtime_type;
+                    _$('overtimeDate').value = r.date;
+                    _$('overtimeStartTime').value = r.start_time;
+                    _$('overtimeEndTime').value = r.end_time;
+                    _$('overtimeRemark').value = r.remark || '';
                     document.getElementById('overtimeModalTitle').textContent = '编辑加班记录';
                     onOvertimeTypeChange();
-                    document.getElementById('overtimeDuration').value = parseFloat(r.duration).toFixed(1) + ' 小时';
+                    _$('overtimeDuration').value = parseFloat(r.duration).toFixed(1) + ' 小时';
                     document.getElementById('overtimeDurationHint').textContent = '可手动修改';
                 }
             }
@@ -4444,15 +4582,18 @@
         }
 
         async function saveOvertimeRecord(event) {
-            event.preventDefault();
-            const id = document.getElementById('overtimeRecordId').value;
-            const durationText = document.getElementById('overtimeDuration').value.trim();
+            if (window._submitting) return;
+            window._submitting = true;
+            try {
+                event.preventDefault();
+                const id = document.getElementById('overtimeRecordId').value;
+            const durationText = _$('overtimeDuration').value.trim();
             const data = {
-                overtime_type: document.getElementById('overtimeType').value,
-                date: document.getElementById('overtimeDate').value,
-                start_time: document.getElementById('overtimeStartTime').value,
-                end_time: document.getElementById('overtimeEndTime').value,
-                remark: document.getElementById('overtimeRemark').value.trim()
+                overtime_type: _$('overtimeType').value,
+                date: _$('overtimeDate').value,
+                start_time: _$('overtimeStartTime').value,
+                end_time: _$('overtimeEndTime').value,
+                remark: _$('overtimeRemark').value.trim()
             };
             const parsed = parseFloat(durationText);
             if (!isNaN(parsed) && parsed > 0) {
@@ -4461,10 +4602,14 @@
             if (!data.date) { alert('请选择日期'); return; }
             if (!data.start_time) { alert('请填写开始时间'); return; }
             if (!data.end_time) { alert('请填写结束时间'); return; }
+            if (data.end_time <= data.start_time) {
+                alert('结束时间必须晚于开始时间');
+                return;
+            }
             try {
                 const url = id ? `${API_URL}/overtime/${id}` : `${API_URL}/overtime`;
                 const method = id ? 'PUT' : 'POST';
-                const response = await fetch(url, {
+                const response = await fetchWithTimeout(url, {
                     method,
                     headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
                     body: JSON.stringify(data)
@@ -4473,9 +4618,13 @@
                 if (!response.ok) throw new Error(result.error || '保存失败');
                 closeOvertimeModal();
                 loadOvertimeRecords();
+                loadOvertimeCount();
                 alert(id ? '更新成功' : '添加成功');
             } catch (error) {
                 alert(error.message);
+            }
+            } finally {
+                window._submitting = false;
             }
         }
 
@@ -4486,7 +4635,7 @@
         async function deleteOvertimeRecord(id) {
             if (!confirm('确定要删除这条加班记录吗？')) return;
             try {
-                const response = await fetch(`${API_URL}/overtime/${id}`, {
+                const response = await fetchWithTimeout(`${API_URL}/overtime/${id}`, {
                     method: 'DELETE',
                     headers: getAuthHeaders()
                 });
@@ -4494,6 +4643,7 @@
                 selectedOvertimeIds.delete(id);
                 updateDeleteSelectedBtn();
                 loadOvertimeRecords();
+                loadOvertimeCount();
                 alert('删除成功');
             } catch (error) {
                 alert(error.message);
@@ -4542,7 +4692,7 @@
             if (!confirm(`确定要删除选中的 ${selectedOvertimeIds.size} 条加班记录吗？`)) return;
             try {
                 const ids = Array.from(selectedOvertimeIds);
-                const response = await fetch(`${API_URL}/overtime/batch-delete`, {
+                const response = await fetchWithTimeout(`${API_URL}/overtime/batch-delete`, {
                     method: 'POST',
                     headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
                     body: JSON.stringify({ ids })
@@ -4552,18 +4702,20 @@
                 selectedOvertimeIds.clear();
                 updateDeleteSelectedBtn();
                 loadOvertimeRecords();
+                loadOvertimeCount();
                 alert(result.message);
             } catch (error) {
                 alert(error.message);
                 selectedOvertimeIds.clear();
                 updateDeleteSelectedBtn();
                 loadOvertimeRecords();
+                loadOvertimeCount();
             }
         }
 
         async function loadCategories() {
             try {
-                const response = await fetch(`${API_URL}/categories`, {
+                const response = await fetchWithTimeout(`${API_URL}/categories`, {
                     headers: getAuthHeaders()
                 });
                 
@@ -4574,20 +4726,20 @@
                 const categories = await response.json();
 
                 // 获取总文章数
-                const statsResponse = await fetch(`${API_URL}/stats`, {
+                const statsResponse = await fetchWithTimeout(`${API_URL}/stats`, {
                     headers: getAuthHeaders()
                 });
                 const stats = await statsResponse.json();
-                const totalArticles = stats.total_articles || 0;
+                const catTotalArticles = stats.total_articles || 0;
 
-                const select = document.getElementById('articleCategory');
+                const select = _$('articleCategory');
                 select.innerHTML = categories.map(c => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('');
 
                 document.getElementById('categoryList').innerHTML = `
                     <div class="category-item ${!currentCategory ? 'active' : ''}" onclick="showAll()">
                         <div class="category-left"><div class="category-dot" style="background:#64748b;"></div><span class="category-name">全部</span></div>
                         <div class="category-actions">
-                            <span class="category-count">${totalArticles}</span>
+                            <span class="category-count">${catTotalArticles}</span>
                         </div>
                     </div>
                 ` + categories.map(c => `
@@ -4641,7 +4793,7 @@
 
         async function loadStats() {
             try {
-                const response = await fetch(`${API_URL}/stats`, {
+                const response = await fetchWithTimeout(`${API_URL}/stats`, {
                     headers: getAuthHeaders()
                 });
                 
@@ -4663,15 +4815,16 @@
         }
 
         function openModal(id) {
+            document.body.style.overflow = 'hidden';
             editingId = id;
             document.getElementById('articleModal').classList.add('active');
             if (id) {
                 // 先显示通用占位，等异步加载到真实分类后再由 loadArticleForEdit 覆盖，避免标题短暂闪烁成错误文案
-                document.getElementById('modalTitle').textContent = '编辑中...';
+                _$('modalTitle').textContent = '编辑中...';
                 loadArticleForEdit(id);
             } else {
-                document.getElementById('modalTitle').textContent = '新增' + articleTerm(currentCategory);
-                document.getElementById('articleTitle').placeholder = '输入' + articleTerm(currentCategory) + '标题';
+                _$('modalTitle').textContent = '新增' + articleTerm(currentCategory);
+                _$('articleTitle').placeholder = '输入' + articleTerm(currentCategory) + '标题';
                 document.getElementById('articleForm').reset();
                 document.getElementById('articleId').value = '';
                 setTimeout(() => {
@@ -4743,7 +4896,7 @@
                     });
                     
                     easyMDE = new EasyMDE({
-                        element: document.getElementById('articleContent'),
+                        element: _$('articleContent'),
                         spellChecker: false,
                         autosave: {
                             enabled: false
@@ -4934,7 +5087,7 @@
 
         async function loadArticleForEdit(id) {
             try {
-                const response = await fetch(`${API_URL}/articles/${id}`, {
+                const response = await fetchWithTimeout(`${API_URL}/articles/${id}`, {
                     headers: getAuthHeaders()
                 });
                 
@@ -4948,12 +5101,12 @@
                 
                 const article = await response.json();
                 document.getElementById('articleId').value = article.id;
-                document.getElementById('articleTitle').value = article.title;
-                document.getElementById('articleTitle').placeholder = '输入' + articleTerm(article.category) + '标题';
-                document.getElementById('modalTitle').textContent = '编辑' + articleTerm(article.category);
-                document.getElementById('articleCategory').value = article.category;
-                document.getElementById('articleTags').value = article.tags || '';
-                document.getElementById('articleContent').value = article.content;
+                _$('articleTitle').value = article.title;
+                _$('articleTitle').placeholder = '输入' + articleTerm(article.category) + '标题';
+                _$('modalTitle').textContent = '编辑' + articleTerm(article.category);
+                _$('articleCategory').value = article.category;
+                _$('articleTags').value = article.tags || '';
+                _$('articleContent').value = article.content;
                 setTimeout(() => {
                     if (easyMDE) easyMDE.toTextArea();
                     // 配置Marked.js
@@ -5023,7 +5176,7 @@
                     });
                     
                     easyMDE = new EasyMDE({
-                        element: document.getElementById('articleContent'),
+                        element: _$('articleContent'),
                         spellChecker: false,
                         autosave: {
                             enabled: false
@@ -5215,6 +5368,7 @@
         }
 
         function closeModal(modalId) { 
+            document.body.style.overflow = '';
             if (modalId) {
                 const el = document.getElementById(modalId);
                 if (el) {
@@ -5225,18 +5379,23 @@
                 document.getElementById('articleModal').classList.remove('active'); 
                 editingId = null; 
             }
+            const pwdFields = document.querySelectorAll('#loginModal input[type="password"], #registerModal input[type="password"]');
+            pwdFields.forEach(f => f.value = '');
         }
 
         async function saveArticle(event) {
-            // 移除event.preventDefault()，因为按钮现在是type="button"
-            console.log('=== saveArticle function called ===');
-            
+            if (window._submitting) return;
+            window._submitting = true;
             try {
+                // 移除event.preventDefault()，因为按钮现在是type="button"
+                console.log('=== saveArticle function called ===');
+                
+                try {
                 // 检查DOM元素是否存在
-                const titleElement = document.getElementById('articleTitle');
-                const categoryElement = document.getElementById('articleCategory');
-                const tagsElement = document.getElementById('articleTags');
-                const contentElement = document.getElementById('articleContent');
+                const titleElement = _$('articleTitle');
+                const categoryElement = _$('articleCategory');
+                const tagsElement = _$('articleTags');
+                const contentElement = _$('articleContent');
                 const idElement = document.getElementById('articleId');
                 
                 console.log('DOM elements:', {
@@ -5275,7 +5434,7 @@
                 
                 // 发送请求
                 console.log('Sending request...');
-                const response = await fetch(id ? `${API_URL}/articles/${id}` : `${API_URL}/articles`, {
+                const response = await fetchWithTimeout(id ? `${API_URL}/articles/${id}` : `${API_URL}/articles`, {
                     method: id ? 'PUT' : 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -5294,9 +5453,7 @@
                 closeModal();
                 if (easyMDE) easyMDE.toTextArea();
                 easyMDE = null;
-                loadArticles();
-                loadCategories();
-                loadStats();
+                await Promise.all([loadArticles(), loadCategories(), loadStats()]);
                 
                 alert(id ? articleTerm(article.category) + '更新成功！' : articleTerm(article.category) + '保存成功！');
             } catch (error) {
@@ -5307,17 +5464,23 @@
                     checkAuth();
                 }
             }
+            } finally {
+                window._submitting = false;
+            }
         }
 
         async function saveDraft() {
-            console.log('=== saveDraft function called ===');
-            
+            if (window._submitting) return;
+            window._submitting = true;
             try {
+                console.log('=== saveDraft function called ===');
+                
+                try {
                 // 检查DOM元素是否存在
-                const titleElement = document.getElementById('articleTitle');
-                const categoryElement = document.getElementById('articleCategory');
-                const tagsElement = document.getElementById('articleTags');
-                const contentElement = document.getElementById('articleContent');
+                const titleElement = _$('articleTitle');
+                const categoryElement = _$('articleCategory');
+                const tagsElement = _$('articleTags');
+                const contentElement = _$('articleContent');
                 const idElement = document.getElementById('articleId');
                 
                 console.log('DOM elements:', {
@@ -5347,7 +5510,7 @@
                 
                 // 发送请求
                 console.log('Sending request...');
-                const response = await fetch(id ? `${API_URL}/articles/${id}` : `${API_URL}/articles`, {
+                const response = await fetchWithTimeout(id ? `${API_URL}/articles/${id}` : `${API_URL}/articles`, {
                     method: id ? 'PUT' : 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -5367,7 +5530,7 @@
                 
                 closeModal();
                 
-                loadArticles();
+                await await Promise.all([loadArticles(), loadCategories(), loadStats()]);
             } catch (error) {
                 console.error('保存草稿失败:', error);
                 alert('保存草稿失败，请稍后重试');
@@ -5375,6 +5538,9 @@
                     // 未授权，重新检查认证状态
                     checkAuth();
                 }
+            }
+            } finally {
+                window._submitting = false;
             }
         }
 
@@ -5384,7 +5550,7 @@
             const category = cached ? cached.category : currentCategory;
             if (!confirm('确定要删除这篇' + articleTerm(category) + '吗？')) return;
             try {
-                const response = await fetch(`${API_URL}/articles/${id}`, {
+                const response = await fetchWithTimeout(`${API_URL}/articles/${id}`, {
                     method: 'DELETE',
                     headers: getAuthHeaders()
                 });
@@ -5393,13 +5559,15 @@
                     throw new Error('删除文章失败');
                 }
 
-                loadArticles();
-                loadCategories();
-                loadStats();
+                if (renderedArticlesCache.length === 1 && currentPage > 1) {
+                    currentPage--;
+                }
+
+                await await Promise.all([loadArticles(), loadCategories(), loadStats()]);
 
                 // 清除选中状态，隐藏删除按钮
-                const selectAll = document.getElementById('selectAll');
-                if (selectAll) selectAll.checked = false;
+                const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+                if (selectAllCheckbox) selectAllCheckbox.checked = false;
                 const checkboxes = document.querySelectorAll('.article-checkbox');
                 checkboxes.forEach(cb => cb.checked = false);
                 updateSelectedCount();
@@ -5408,10 +5576,6 @@
             } catch (error) {
                 console.error('删除文章失败:', error);
                 alert('删除失败，请稍后重试');
-                if (error.message === '删除文章失败') {
-                    // 可能是未登录，重新检查认证状态
-                    checkAuth();
-                }
             }
         }
 
@@ -5450,7 +5614,7 @@
             }
             
             try {
-                const response = await fetch(`${API_URL}/articles/batch-delete`, {
+                const response = await fetchWithTimeout(`${API_URL}/articles/batch-delete`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -5461,13 +5625,14 @@
                 const result = await response.json();
                 
                 if (response.ok) {
-                    loadArticles();
-                    loadCategories();
-                    loadStats();
+                    if (renderedArticlesCache.length === articleIds.length && currentPage > 1) {
+                        currentPage--;
+                    }
+                    await await Promise.all([loadArticles(), loadCategories(), loadStats()]);
                     
                     // 清除选中状态，隐藏删除按钮
-                    const selectAll = document.getElementById('selectAll');
-                    if (selectAll) selectAll.checked = false;
+                    const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+                    if (selectAllCheckbox) selectAllCheckbox.checked = false;
                     const checkboxes = document.querySelectorAll('.article-checkbox');
                     checkboxes.forEach(cb => cb.checked = false);
                     updateSelectedCount();
@@ -5497,7 +5662,7 @@
                     // 移除Content-Type，让浏览器自动设置
                     delete headers['Content-Type'];
                     
-                    const response = await fetch(`${API_URL}/upload`, {
+                    const response = await fetchWithTimeout(`${API_URL}/upload`, {
                         method: 'POST',
                         headers: headers,
                         body: formData
@@ -5508,11 +5673,12 @@
                         if (easyMDE) {
                             easyMDE.value(easyMDE.value() + imageMarkdown);
                         } else {
-                            document.getElementById('articleContent').value += imageMarkdown;
+                            _$('articleContent').value += imageMarkdown;
                         }
                     }
                 } catch (error) {
                     console.error('上传图片失败:', error);
+                    alert('上传图片失败，请稍后重试');
                 }
             };
             input.click();
@@ -5526,7 +5692,7 @@
             if (easyMDE) {
                 easyMDE.value(easyMDE.value() + linkMarkdown);
             } else {
-                document.getElementById('articleContent').value += linkMarkdown;
+                _$('articleContent').value += linkMarkdown;
             }
         }
 
@@ -5551,7 +5717,7 @@
                 
                 easyMDE.codemirror.setCursor({line: newLine, ch: newCh});
             } else {
-                document.getElementById('articleContent').value += codeBlock;
+                _$('articleContent').value += codeBlock;
             }
         }
 
@@ -5563,18 +5729,22 @@
 
         function closeCategoryModal() {
             document.getElementById('categoryModal').classList.remove('active');
+            document.getElementById('categoryForm').reset();
         }
 
         async function saveCategory(event) {
-            event.preventDefault();
-            const name = document.getElementById('categoryName').value.trim();
+            if (window._submitting) return;
+            window._submitting = true;
+            try {
+                event.preventDefault();
+                const name = document.getElementById('categoryName').value.trim();
             if (!name) { alert('请输入分类名称'); return; }
             const category = {
                 name: name,
                 color: document.getElementById('categoryColor').value
             };
             try {
-                const response = await fetch(`${API_URL}/categories`, {
+                const response = await fetchWithTimeout(`${API_URL}/categories`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -5598,6 +5768,9 @@
             console.error('保存分类失败:', error);
             alert('保存分类失败，请稍后重试');
         }
+        } finally {
+            window._submitting = false;
+        }
     }
 
     // 删除分类
@@ -5609,7 +5782,7 @@
         try {
             // 确保分类名称是字符串类型
             const categoryNameStr = String(categoryName);
-            const response = await fetch(`${API_URL}/categories/${encodeURIComponent(categoryNameStr)}`, {
+            const response = await fetchWithTimeout(`${API_URL}/categories/${encodeURIComponent(categoryNameStr)}`, {
                 method: 'DELETE',
                 headers: getAuthHeaders()
             });
@@ -5624,7 +5797,7 @@
             
             await response.json();
             alert('分类删除成功！');
-            loadCategories();
+            await loadCategories();
         } catch (error) {
             console.error('删除分类失败:', error);
             alert('删除分类失败，请稍后重试');
@@ -5635,10 +5808,7 @@
 
         // 关闭分类右键菜单
         function closeCategoryContextMenu() {
-            const menu = document.getElementById('categoryContextMenu');
-            if (menu) {
-                menu.style.display = 'none';
-            }
+            document.querySelectorAll('.category-context-menu').forEach(m => m.style.display = 'none');
         }
         
         // 显示分类右键菜单
@@ -5703,7 +5873,7 @@
                     gfm: true
                 });
             
-            const articleList = document.getElementById('articleList');
+            const articleList = _$('articleList');
             if (!articleList) {
                 console.error('articleList not found');
                 return;
@@ -5713,7 +5883,7 @@
             articleList.innerHTML = '<div style="text-align: center; padding: 40px;">加载中...</div>';
             
             // 直接获取文章数据
-            fetch(`${API_URL}/articles/${id}`, {
+            fetchWithTimeout(`${API_URL}/articles/${id}`, {
                 headers: getAuthHeaders()
             })
                 .then(response => {
