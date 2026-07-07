@@ -1967,10 +1967,10 @@ def get_expenses_stats():
             params = [g.user_id, yr_start, yr_end]
             if start_month:
                 conditions.append('substr(date, 6, 2) >= ?')
-                params.append(int(start_month))
+                params.append(start_month)
             if end_month:
                 conditions.append('substr(date, 6, 2) <= ?')
-                params.append(int(end_month))
+                params.append(end_month)
         else:
             conditions = ['user_id = ?']
             params = [g.user_id]
@@ -2014,10 +2014,10 @@ def get_expenses_stats_monthly():
             params.extend([yr_start, yr_end])
     if start_month:
         conditions.append('substr(date, 6, 2) >= ?')
-        params.append(int(start_month))
+        params.append(start_month)
     if end_month:
         conditions.append('substr(date, 6, 2) <= ?')
-        params.append(int(end_month))
+        params.append(end_month)
 
     where_clause = ' AND '.join(conditions)
 
