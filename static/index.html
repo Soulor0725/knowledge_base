@@ -3393,6 +3393,9 @@
             document.getElementById('kiwiSalesForm').reset();
             document.getElementById('kiwiSaleId').value = '';
             document.getElementById('kiwiSalesModalTitle').textContent = '新增订单';
+            if (!id) {
+                _$('kiwiOrderDate').value = new Date().toISOString().slice(0, 10);
+            }
             if (id) {
                 const sale = kiwiSalesData.find(s => s.id === id);
                 if (sale) {
@@ -4560,6 +4563,9 @@
             document.getElementById('overtimeModalTitle').textContent = '新增加班记录';
             _$('overtimeDuration').value = '';
             document.getElementById('overtimeDurationHint').textContent = '自动计算';
+            if (!id) {
+                _$('overtimeDate').value = new Date().toISOString().slice(0, 10);
+            }
             onOvertimeTypeChange();
             if (id) {
                 const r = overtimeData.find(x => x.id === id);
