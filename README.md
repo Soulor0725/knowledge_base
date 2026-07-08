@@ -2,11 +2,11 @@
 
 一个基于 Flask 和 JavaScript 的综合管理系统，包含个人知识库、猕猴桃销售管理和消费记录管理功能。
 
+
 ## 当前版本
 
-**v2.5.4**
-
-> 更新说明：修复「猕猴桃销售」「加班记录」新增表单日期字段未自动填充今日日期的问题。详见 VERSION.md
+**v2.5.5**
+> 关键修复：死锁、连接泄漏、加班竞态、Stored XSS、健康检查泄露、索引缺失共6项后端修复 + 前端布局/颜色/空数据等5项优化 + 全量审计（6角度扫描/117候选/9项确认）。详见 VERSION.md
 
 ## ✨ 功能特性
 
@@ -199,7 +199,7 @@ knowledge_base/
 │   ├── index.html             # 前端界面（单文件 SPA，~5940 行）
 │   ├── favicon.ico
 │   └── uploads/               # 用户上传的图片（已 gitignore）
-├── docs/                      # 架构图、PRD、交互设计文档、Playwright 设置
+├── docs/                      # 架构图、PRD、Bug修复经验、TOKEN优化等文档
 ├── .github/
 │   └── workflows/
 │       └── playwright.yml     # Playwright E2E 测试 CI
@@ -244,6 +244,25 @@ if __name__ == '__main__':
 
 各模块分页默认每页5条，可在 `static/index.html` 中修改对应 `pageSize` 变量（如 `kiwiReportPageSize`、`expensePageSize`）。
 
+
+## 安全修复 (v2.5.5)
+
+2026-07-09 全面安全审计修复 16 项问题：
+
+| 优先级 | 修复内容 |
+|--------|---------|
+| P0 | 全局缓存并发读写加锁 |
+| P0 | batch-delete id 整数类型校验 |
+| P0 | CSV 导出 sanitize_csv_field 防注入 |
+| P0 | views 自增异常 logger.warning |
+| P1 | 前端 3 处 escapeHtml() XSS 遗漏 |
+| P1 | 文件上传 magic bytes 校验 |
+| P1 | kiwi CSV generator 空行 bug |
+| P1 | datetime.now() 改为 UTC 时区 |
+| P2 | 抽取 kiwi 重复校验为辅助函数 |
+
+详见 AGENTS.md 的 Bug Fix 经验教训部分。
+
 ## 🤝 贡献
 
 欢迎提交 Issue 和 Pull Request！
@@ -259,3 +278,4 @@ MIT License
 ---
 
 **✨ 开始使用你的智慧管理中心吧！** ✨
+

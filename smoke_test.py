@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# DEPRECATED: 已迁移到 tests/test_smoke.py。本文件保留作为历史参考，请勿新增用例。
+#!/usr/bin/env python3
 import sys, requests, json, random, string
 
 BASE = 'http://localhost:5001/api'

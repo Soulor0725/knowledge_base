@@ -16,24 +16,54 @@ from passlib.hash import pbkdf2_sha256
 from functools import wraps
 import time
 import threading
+import logging
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+logger = logging.getLogger(__name__)
 
 # 简单内存频率限制，限制大小防止DoS
-MAX_LOGIN_ATTEMPT_ENTRIES = 10000  # 最多10000条IP记录
-login_attempts = {}
+logger.info("=" * 50)
+logger.info("Starting Echo...")
+logger.info(f"Current file: {__file__}")
+logger.info(f"Working dir: {os.getcwd()}")
+logger.info("=" * 50)
+
+# ── 集中配置常量 ──
+# 登录频率限制
+MAX_LOGIN_ATTEMPT_ENTRIES = 10000
+_LOGIN_LOCK = threading.Lock()
 RATE_LIMIT_WINDOW = 300  # 5分钟窗口
 RATE_LIMIT_MAX = 10      # 窗口内最大尝试次数
 
-# 调试启动信息
-print("="*50)
-print("正在启动 Echo...")
-print(f"当前文件: {__file__}")
-print(f"工作目录: {os.getcwd()}")
-print("="*50)
+# 缓存配置
+_CACHE_TTL = 300          # 缓存有效期 5 分钟
+_CACHE_MAX_SIZE = 1000    # 最多缓存 1000 个用户
+_CACHE_EXPIRED = object()
+_cache_lock = threading.Lock()
+
+# 密码策略
+PASSWORD_MIN_LENGTH = 8
+USERNAME_MIN_LENGTH = 3
+
+# 登录尝试记录（IP → [时间戳列表]）
+login_attempts = {}
 
 app = Flask(__name__, static_folder='static')
-CORS(app, origins=['http://localhost:5001', 'http://127.0.0.1:5001'])
+CORS(app, origins=['http://localhost:5001', 'http://127.0.0.1:5001', 'http://localhost:5173', 'http://127.0.0.1:5173'])
 Compress(app)
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or os.urandom(32).hex()
+
+# SECRET_KEY 持久化：优先环境变量 > 已保存文件 > 随机生成并保存，
+# 避免每次重启导致所有已登录 token 失效
+_SECRET_KEY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.secret_key')
+if os.environ.get('SECRET_KEY'):
+    app.config['SECRET_KEY'] = os.environ['SECRET_KEY']
+elif os.path.exists(_SECRET_KEY_FILE):
+    with open(_SECRET_KEY_FILE, 'r') as f:
+        app.config['SECRET_KEY'] = f.read().strip()
+else:
+    app.config['SECRET_KEY'] = os.urandom(32).hex()
+    with open(_SECRET_KEY_FILE, 'w') as f:
+        f.write(app.config['SECRET_KEY'])
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB 上传大小限制
 
 @app.errorhandler(400)
@@ -74,9 +104,40 @@ def add_cache_headers(response):
         response.headers['Cache-Control'] = 'private, max-age=60'
     return response
 
+
+# ── 请求耗时 + 慢请求日志中间件 ──
+@app.before_request
+def before_request_timing():
+    g.start_time = time.time()
+
+
+@app.after_request
+def after_request_timing(response):
+    if hasattr(g, 'start_time'):
+        elapsed = time.time() - g.start_time
+        response.headers['X-Response-Time'] = f'{elapsed*1000:.1f}ms'
+        if elapsed > 1.0:
+            logger.warning(f'慢请求: {request.method} {request.path} 耗时 {elapsed:.2f}s')
+    return response
+
+
 @app.route('/favicon.ico')
 def favicon():
     return send_from_directory(app.static_folder, 'favicon.ico', mimetype='image/x-icon')
+
+
+@app.route('/api/health')
+def health():
+    """健康检查端点"""
+    try:
+        get_db().execute('SELECT 1')
+        return jsonify({'status': 'ok', 'db': 'connected'}), 200
+    except Exception as e:
+        logger.error(f'数据库连接失败: {e}')
+        return jsonify({'status': 'error', 'db': 'unavailable'}), 503
+
+
+# ---- DB + auth utils ----
 
 DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'knowledge_base.db')
 UPLOAD_FOLDER = os.path.join('static', 'uploads')
@@ -166,151 +227,154 @@ def login_required(f):
 def init_db():
     """初始化数据库"""
     conn = sqlite3.connect(DATABASE)
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
 
-    # 创建用户表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL,
-            name TEXT DEFAULT '',
-            avatar TEXT DEFAULT '',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
+        # 创建用户表
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password TEXT NOT NULL,
+                name TEXT DEFAULT '',
+                avatar TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
 
-    # 创建文章表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS articles (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            content TEXT NOT NULL,
-            category TEXT DEFAULT '未分类',
-            tags TEXT DEFAULT '',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            views INTEGER DEFAULT 0,
-            is_favorite INTEGER DEFAULT 0,
-            is_draft INTEGER DEFAULT 0,
-            user_id INTEGER,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-    ''')
+        # 创建文章表
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS articles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                category TEXT DEFAULT '未分类',
+                tags TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                views INTEGER DEFAULT 0,
+                is_favorite INTEGER DEFAULT 0,
+                is_draft INTEGER DEFAULT 0,
+                user_id INTEGER,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        ''')
 
-    # 创建分类表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS categories (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL,
-            color TEXT DEFAULT '#667eea',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            user_id INTEGER
-        )
-    ''')
+        # 创建分类表
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS categories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                color TEXT DEFAULT '#667eea',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                user_id INTEGER
+            )
+        ''')
 
-    # 创建猕猴桃销售表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS kiwi_sales (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            customer_name TEXT NOT NULL,
-            phone TEXT NOT NULL,
-            address TEXT NOT NULL,
-            order_date TEXT NOT NULL,
-            status TEXT DEFAULT '未发货',
-            tracking_number TEXT,
-            remark TEXT,
-            quantity INTEGER DEFAULT 0,
-            payment_amount REAL DEFAULT 0.00,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            user_id INTEGER,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-    ''')
+        # 创建猕猴桃销售表
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS kiwi_sales (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                customer_name TEXT NOT NULL,
+                phone TEXT NOT NULL,
+                address TEXT NOT NULL,
+                order_date TEXT NOT NULL,
+                status TEXT DEFAULT '未发货',
+                tracking_number TEXT,
+                remark TEXT,
+                quantity INTEGER DEFAULT 0,
+                payment_amount REAL DEFAULT 0.00,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                user_id INTEGER,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        ''')
 
-    # 检查并添加remark列（用于已存在的表）
-    cursor.execute("PRAGMA table_info(kiwi_sales)")
-    columns = [col[1] for col in cursor.fetchall()]
-    if 'remark' not in columns:
-        cursor.execute("ALTER TABLE kiwi_sales ADD COLUMN remark TEXT")
+        # 检查并添加remark列（用于已存在的表）
+        cursor.execute("PRAGMA table_info(kiwi_sales)")
+        columns = [col[1] for col in cursor.fetchall()]
+        if 'remark' not in columns:
+            cursor.execute("ALTER TABLE kiwi_sales ADD COLUMN remark TEXT")
 
-    # 检查并添加quantity列
-    if 'quantity' not in columns:
-        cursor.execute("ALTER TABLE kiwi_sales ADD COLUMN quantity INTEGER DEFAULT 0")
+        # 检查并添加quantity列
+        if 'quantity' not in columns:
+            cursor.execute("ALTER TABLE kiwi_sales ADD COLUMN quantity INTEGER DEFAULT 0")
 
-    # 检查并添加payment_amount列
-    if 'payment_amount' not in columns:
-        cursor.execute("ALTER TABLE kiwi_sales ADD COLUMN payment_amount REAL DEFAULT 0.00")
+        # 检查并添加payment_amount列
+        if 'payment_amount' not in columns:
+            cursor.execute("ALTER TABLE kiwi_sales ADD COLUMN payment_amount REAL DEFAULT 0.00")
 
-    # 检查并添加status列（替换ship_date）
-    if 'status' not in columns:
-        cursor.execute("ALTER TABLE kiwi_sales ADD COLUMN status TEXT DEFAULT '未发货'")
+        # 检查并添加status列（替换ship_date）
+        if 'status' not in columns:
+            cursor.execute("ALTER TABLE kiwi_sales ADD COLUMN status TEXT DEFAULT '未发货'")
 
-    # 检查并添加 token_version 列（用于踢掉旧登录）
-    cursor.execute("PRAGMA table_info(users)")
-    user_columns = [col[1] for col in cursor.fetchall()]
-    if 'token_version' not in user_columns:
-        cursor.execute("ALTER TABLE users ADD COLUMN token_version INTEGER DEFAULT 0")
+        # 检查并添加 token_version 列（用于踢掉旧登录）
+        cursor.execute("PRAGMA table_info(users)")
+        user_columns = [col[1] for col in cursor.fetchall()]
+        if 'token_version' not in user_columns:
+            cursor.execute("ALTER TABLE users ADD COLUMN token_version INTEGER DEFAULT 0")
 
 
-    # 创建加班记录表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS overtime_records (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            overtime_type TEXT NOT NULL,
-            date TEXT NOT NULL,
-            start_time TEXT NOT NULL,
-            end_time TEXT NOT NULL,
-            duration REAL NOT NULL,
-            remark TEXT DEFAULT '',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            user_id INTEGER,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-    ''')
+        # 创建加班记录表
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS overtime_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                overtime_type TEXT NOT NULL,
+                date TEXT NOT NULL,
+                start_time TEXT NOT NULL,
+                end_time TEXT NOT NULL,
+                duration REAL NOT NULL,
+                remark TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                user_id INTEGER,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        ''')
 
-    # 创建记账表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS expenses (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            category TEXT NOT NULL,
-            amount REAL NOT NULL,
-            remark TEXT DEFAULT '',
-            date TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            user_id INTEGER,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-    ''')
+        # 创建记账表
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS expenses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                category TEXT NOT NULL,
+                amount REAL NOT NULL,
+                remark TEXT DEFAULT '',
+                date TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                user_id INTEGER,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        ''')
 
-    # 建索引（放在所有 CREATE TABLE 之后）
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_articles_user_id ON articles(user_id)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_articles_updated_at ON articles(updated_at)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_kiwi_sales_user_id ON kiwi_sales(user_id)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_overtime_user_id ON overtime_records(user_id)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_overtime_date ON overtime_records(date)")
-    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_overtime_user_date ON overtime_records(user_id, date)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_expenses_user_id ON expenses(user_id)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(category)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_articles_user_category ON articles(user_id, category)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_articles_user_updated ON articles(user_id, updated_at DESC)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_kiwi_sales_user_created ON kiwi_sales(user_id, created_at DESC)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_expenses_user_date_cat ON expenses(user_id, date)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_expenses_user_yearmonth ON expenses(user_id, substr(date, 1, 7))")
+        # 建索引（放在所有 CREATE TABLE 之后）
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_articles_user_id ON articles(user_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_articles_updated_at ON articles(updated_at)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_kiwi_sales_user_id ON kiwi_sales(user_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_overtime_user_id ON overtime_records(user_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_overtime_date ON overtime_records(date)")
+        cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_overtime_user_date ON overtime_records(user_id, date)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_expenses_user_id ON expenses(user_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(category)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_articles_user_category ON articles(user_id, category)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_articles_user_updated ON articles(user_id, updated_at DESC)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_kiwi_sales_user_created ON kiwi_sales(user_id, created_at DESC)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_expenses_user_date_cat ON expenses(user_id, date)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_expenses_user_yearmonth ON expenses(user_id, substr(date, 1, 7))")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_expenses_user_month ON expenses(user_id, substr(date, 6, 2))")
 
-    # 检查是否已有分类，如果没有则插入默认分类
-    cursor.execute('SELECT COUNT(*) FROM categories')
-    count = cursor.fetchone()[0]
-    if count == 0:
-        # 只在数据库为空时插入默认分类
-        cursor.execute("INSERT INTO categories (name, color, user_id) VALUES ('技术', '#667eea', 0)")
-        cursor.execute("INSERT INTO categories (name, color, user_id) VALUES ('生活', '#764ba2', 0)")
-        cursor.execute("INSERT INTO categories (name, color, user_id) VALUES ('学习', '#f093fb', 0)")
-        cursor.execute("INSERT INTO categories (name, color, user_id) VALUES ('工作', '#4facfe', 0)")
+        # 检查是否已有分类，如果没有则插入默认分类
+        cursor.execute('SELECT COUNT(*) FROM categories')
+        count = cursor.fetchone()[0]
+        if count == 0:
+            # 只在数据库为空时插入默认分类
+            cursor.execute("INSERT INTO categories (name, color, user_id) VALUES ('技术', '#667eea', 0)")
+            cursor.execute("INSERT INTO categories (name, color, user_id) VALUES ('生活', '#764ba2', 0)")
+            cursor.execute("INSERT INTO categories (name, color, user_id) VALUES ('学习', '#f093fb', 0)")
+            cursor.execute("INSERT INTO categories (name, color, user_id) VALUES ('工作', '#4facfe', 0)")
 
-    conn.commit()
-    conn.close()
+        conn.commit()
+    finally:
+        conn.close()
 
 @app.route('/api/auth/register', methods=['POST'])
 def register():
@@ -327,10 +391,10 @@ def register():
     if not username or not password:
         return jsonify({'error': '用户名和密码不能为空'}), 400
     
-    if len(username) < 3 or len(password) < 6:
-        return jsonify({'error': '用户名至少3个字符，密码至少6个字符，且需包含字母和数字'}), 400
-    if not re.search(r'[A-Za-z]', password) or not re.search(r'\d', password):
-        return jsonify({'error': '密码必须同时包含字母和数字'}), 400
+    if len(username) < USERNAME_MIN_LENGTH or len(password) < PASSWORD_MIN_LENGTH:
+        return jsonify({'error': '用户名至少3个字符，密码至少8位，且需包含大小写字母和数字'}), 400
+    if not re.search(r'[A-Z]', password) or not re.search(r'[a-z]', password) or not re.search(r'\d', password):
+        return jsonify({'error': '密码必须同时包含大写字母、小写字母和数字'}), 400
     
     db = get_db()
     cursor = db.cursor()
@@ -352,18 +416,19 @@ def register():
 def login():
     """用户登录"""
     remote_ip = request.remote_addr or 'unknown'
-    now = time.time()
-    attempts = login_attempts.get(remote_ip, [])
-    attempts = [t for t in attempts if now - t < RATE_LIMIT_WINDOW]
-    login_attempts[remote_ip] = attempts
-    if len(login_attempts[remote_ip]) >= RATE_LIMIT_MAX:
-        return jsonify({'error': '登录尝试过于频繁，请5分钟后再试'}), 429
-    login_attempts[remote_ip].append(now)
-    # 限制总IP数量防止DoS（超过则删除最旧的50%）
-    if len(login_attempts) > MAX_LOGIN_ATTEMPT_ENTRIES:
-        sorted_ips = sorted(login_attempts, key=lambda ip: login_attempts[ip][-1] if login_attempts[ip] else 0)
-        for _ip in sorted_ips[:len(sorted_ips)//2]:
-            del login_attempts[_ip]
+    with _LOGIN_LOCK:
+        now = time.time()
+        attempts = login_attempts.get(remote_ip, [])
+        attempts = [t for t in attempts if now - t < RATE_LIMIT_WINDOW]
+        login_attempts[remote_ip] = attempts
+        if len(login_attempts[remote_ip]) >= RATE_LIMIT_MAX:
+            return jsonify({'error': '登录尝试过于频繁，请5分钟后再试'}), 429
+        login_attempts[remote_ip].append(now)
+        # 限制总IP数量防止DoS（超过则删除最旧的50%）
+        if len(login_attempts) > MAX_LOGIN_ATTEMPT_ENTRIES:
+            sorted_ips = sorted(login_attempts, key=lambda ip: login_attempts[ip][-1] if login_attempts[ip] else 0)
+            for _ip in sorted_ips[:len(sorted_ips)//2]:
+                del login_attempts[_ip]
 
     data, err = safe_get_json()
     if err:
@@ -453,7 +518,7 @@ def validate_date(date_str, field='日期'):
 
 
 def clamp_pagination(page, page_size, max_size=50):
-    """瀹夊叏鍖栧垎椤靛弬鏁硷紝鍙傛暟鍙杋5,10,15] 鐘嗛€?5"""
+    """安全化分页参数，每页条数限制为 5/10/15 三档"""
     CHOICES = (5, 10, 15)
     try:
         page = max(1, int(page))
@@ -489,8 +554,6 @@ def _year_to_range(year_str):
         return None, None
 
 
-_CACHE_TTL = 300  # 缓存有效期 5 分钟
-_CACHE_MAX_SIZE = 1000  # 最多缓存 1000 个用户
 _stats_cache = {}
 _stats_cache_time = {}
 _tags_cache = {}
@@ -500,38 +563,38 @@ _tags_cache_time = {}
 def _get_cached(cache, cache_time, user_id):
     """获取缓存值，如果过期或不存在返回 None。"""
     import time as _time
-    ts = cache_time.get(user_id)
-    if ts is None:
-        return _CACHE_EXPIRED
-    if _time.time() - ts > _CACHE_TTL:
-        return _CACHE_EXPIRED
-    return cache.get(user_id)
+    with _cache_lock:
+        ts = cache_time.get(user_id)
+        if ts is None:
+            return _CACHE_EXPIRED
+        if _time.time() - ts > _CACHE_TTL:
+            return _CACHE_EXPIRED
+        return cache.get(user_id)
 
 
 def _set_cached(cache, cache_time, user_id, value):
     """设置缓存，超限时清除最旧的条目。"""
     import time as _time
-    cache[user_id] = value
-    cache_time[user_id] = _time.time()
-    if len(cache) > _CACHE_MAX_SIZE:
-        oldest = sorted(cache_time, key=lambda k: cache_time[k])[:len(cache)//2]
-        for k in oldest:
-            cache.pop(k, None)
-            cache_time.pop(k, None)
-
-
-_CACHE_EXPIRED = object()
-_cache_lock = threading.Lock()
+    with _cache_lock:
+        cache[user_id] = value
+        cache_time[user_id] = _time.time()
+        if len(cache) > _CACHE_MAX_SIZE:
+            oldest = sorted(cache_time, key=lambda k: cache_time[k])[:len(cache)//2]
+            for k in oldest:
+                cache.pop(k, None)
+                cache_time.pop(k, None)
 
 
 def _invalidate_stats(user_id):
-    _stats_cache.pop(user_id, None)
-    _stats_cache_time.pop(user_id, None)
+    with _cache_lock:
+        _stats_cache.pop(user_id, None)
+        _stats_cache_time.pop(user_id, None)
 
 
 def _invalidate_tags(user_id):
-    _tags_cache.pop(user_id, None)
-    _tags_cache_time.pop(user_id, None)
+    with _cache_lock:
+        _tags_cache.pop(user_id, None)
+        _tags_cache_time.pop(user_id, None)
 
 
 @app.route('/')
@@ -635,6 +698,8 @@ def batch_delete_articles():
         return jsonify({'error': '单次删除不能超过100篇文章'}), 400
     db = get_db()
     cursor = db.cursor()
+    if not all(isinstance(i, int) for i in ids):
+        return jsonify({'error': 'ID列表必须全部为整数'}), 400
     placeholders = ','.join(['?'] * len(ids))
     cursor.execute(f'DELETE FROM articles WHERE id IN ({placeholders}) AND user_id=?', ids + [g.user_id])
     deleted = cursor.rowcount
@@ -688,8 +753,8 @@ def get_article(article_id):
         try:
             db.execute('UPDATE articles SET views = views + 1 WHERE id = ?', (article_id,))
             db.commit()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning('views increment failed: %s', e)
         return jsonify(dict(article))
     return jsonify({'error': '文章不存在'}), 404
 
@@ -770,7 +835,7 @@ def update_article(article_id):
         params.append(int(data['is_draft']))
 
     updates.append('updated_at = ?')
-    params.append(datetime.now())
+    params.append(datetime.now(timezone.utc))
     params.append(article_id)
     params.append(g.user_id)
 
@@ -875,15 +940,6 @@ def delete_category(category_id):
         db.rollback()
         return jsonify({'error': '删除失败'}), 500
 
-def _iter_rows(cursor, size=500):
-    while True:
-        rows = cursor.fetchmany(size)
-        if not rows:
-            break
-        for r in rows:
-            yield r
-
-
 def _fetchall_dicts(cursor):
     """Prefetch all rows as dicts while cursor is alive."""
     cols = [d[0] for d in cursor.description] if cursor.description else []
@@ -954,6 +1010,11 @@ def upload_file():
     if file.tell() == 0:
         return jsonify({'error': '文件内容为空'}), 400
     file.seek(0)
+    header = file.read(8)
+    file.seek(0)
+    _ALLOWED_MAGIC = (b'\x89PNG', b'\xff\xd8\xff', b'GIF8', b'RIFF')
+    if not any(header.startswith(m) for m in _ALLOWED_MAGIC):
+        return jsonify({'error': '文件类型校验失败'}), 400
     filename = secure_filename(file.filename)
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     filename = f"{timestamp}_{filename}"
@@ -963,8 +1024,86 @@ def upload_file():
     return jsonify({'url': url, 'filename': filename})
 
 # 获取猕猴桃销售列表
-@app.route('/api/kiwi-sales', methods=['GET'])
-@login_required
+
+
+
+
+def _validate_kiwi_sale_data(data):
+    'Validate kiwi sale input. Returns (error_tuple_or_None, validated_fields_or_None).'
+    customer_name = data.get('customer_name', '').strip()
+    if not customer_name:
+        return (jsonify({'error': '客户名不能为空'}), 400), None
+    if len(customer_name) > 50:
+        return (jsonify({'error': '客户名不能超过50个字符'}), 400), None
+
+    # 电话校验
+    phone = data.get('phone', '').strip()
+    if not phone:
+        return (jsonify({'error': '电话号码不能为空'}), 400), None
+    if not phone.isdigit() or len(phone) != 11:
+        return (jsonify({'error': '请输入有效的11位手机号码'}), 400), None
+
+    # 地址校验
+    address = data.get('address', '').strip()
+    if not address:
+        return (jsonify({'error': '收货地址不能为空'}), 400), None
+    if len(address) > 200:
+        return (jsonify({'error': '地址不能超过200个字符'}), 400), None
+
+    # 接单日期校验
+    order_date = data.get('order_date')
+    if not order_date:
+        return (jsonify({'error': '接单日期不能为空'}), 400), None
+    date_err = validate_date(order_date, '接单日期')
+    if date_err:
+        return date_err
+
+    # 发货日期校验
+    ship_date = data.get('ship_date', '')
+    if ship_date and ship_date < order_date:
+        return (jsonify({'error': '发货日期不能早于接单日期'}), 400), None
+
+    # 运单号校验
+    tracking_number = data.get('tracking_number', '').strip()
+    if tracking_number and len(tracking_number) > 50:
+        return (jsonify({'error': '运单号不能超过50个字符'}), 400), None
+
+    # 备注校验
+    remark = data.get('remark', '').strip()
+    if remark and len(remark) > 50:
+        return (jsonify({'error': '备注不能超过50个字符'}), 400), None
+
+    # 数量校验
+    quantity = data.get('quantity', 0)
+    if not isinstance(quantity, int) or quantity < 0:
+        return (jsonify({'error': '数量必须是正整数'}), 400), None
+
+    # 支付金额校验
+    payment_amount = data.get('payment_amount', 0.00)
+    try:
+        payment_amount = float(payment_amount)
+        if payment_amount < 0:
+            return (jsonify({'error': '支付金额不能为负数'}), 400), None
+        payment_amount = round(payment_amount, 2)
+    except (ValueError, TypeError):
+        return (jsonify({'error': '支付金额必须是数字'}), 400), None
+
+    # 状态校验
+    status = data.get('status', '未发货')
+    if status not in ['已发货', '未发货']:
+        return (jsonify({'error': '状态必须是已发货或未发货'}), 400), None
+
+    return None, {
+        'customer_name': customer_name,
+        'phone': phone,
+        'address': address,
+        'order_date': order_date,
+        'tracking_number': tracking_number,
+        'remark': remark,
+        'quantity': quantity,
+        'payment_amount': payment_amount,
+        'status': status,
+    }
 def get_kiwi_sales():
     db = get_db()
     cursor = db.cursor()
@@ -1029,68 +1168,18 @@ def add_kiwi_sale():
     if not data:
         return jsonify({'error': '请提供订单信息（客户名、电话、地址、接单日期等）'}), 400
     
-    customer_name = data.get('customer_name', '').strip()
-    if not customer_name:
-        return jsonify({'error': '客户名不能为空'}), 400
-    if len(customer_name) > 50:
-        return jsonify({'error': '客户名不能超过50个字符'}), 400
-    
-    # 电话校验
-    phone = data.get('phone', '').strip()
-    if not phone:
-        return jsonify({'error': '电话号码不能为空'}), 400
-    if not phone.isdigit() or len(phone) != 11:
-        return jsonify({'error': '请输入有效的11位手机号码'}), 400
-    
-    # 地址校验
-    address = data.get('address', '').strip()
-    if not address:
-        return jsonify({'error': '收货地址不能为空'}), 400
-    if len(address) > 200:
-        return jsonify({'error': '地址不能超过200个字符'}), 400
-    
-    # 接单日期校验
-    order_date = data.get('order_date')
-    if not order_date:
-        return jsonify({'error': '接单日期不能为空'}), 400
-    date_err = validate_date(order_date, '接单日期')
-    if date_err:
-        return date_err
-    
-    # 发货日期校验
-    ship_date = data.get('ship_date', '')
-    if ship_date and ship_date < order_date:
-        return jsonify({'error': '发货日期不能早于接单日期'}), 400
-    
-    # 运单号校验
-    tracking_number = data.get('tracking_number', '').strip()
-    if tracking_number and len(tracking_number) > 50:
-        return jsonify({'error': '运单号不能超过50个字符'}), 400
-    
-    # 备注校验
-    remark = data.get('remark', '').strip()
-    if remark and len(remark) > 50:
-        return jsonify({'error': '备注不能超过50个字符'}), 400
-
-    # 数量校验
-    quantity = data.get('quantity', 0)
-    if not isinstance(quantity, int) or quantity < 0:
-        return jsonify({'error': '数量必须是正整数'}), 400
-
-    # 支付金额校验
-    payment_amount = data.get('payment_amount', 0.00)
-    try:
-        payment_amount = float(payment_amount)
-        if payment_amount < 0:
-            return jsonify({'error': '支付金额不能为负数'}), 400
-        payment_amount = round(payment_amount, 2)
-    except (ValueError, TypeError):
-        return jsonify({'error': '支付金额必须是数字'}), 400
-
-    # 状态校验
-    status = data.get('status', '未发货')
-    if status not in ['已发货', '未发货']:
-        return jsonify({'error': '状态必须是已发货或未发货'}), 400
+    err, validated = _validate_kiwi_sale_data(data)
+    if err:
+        return err
+    customer_name = validated['customer_name']
+    phone = validated['phone']
+    address = validated['address']
+    order_date = validated['order_date']
+    tracking_number = validated['tracking_number']
+    remark = validated['remark']
+    quantity = validated['quantity']
+    payment_amount = validated['payment_amount']
+    status = validated['status']
 
     # 数据库操作
     db = get_db()
@@ -1115,68 +1204,18 @@ def update_kiwi_sale(sale_id):
     if not data:
         return jsonify({'error': '请提供订单信息（客户名、电话、地址、接单日期等）'}), 400
     
-    customer_name = data.get('customer_name', '').strip()
-    if not customer_name:
-        return jsonify({'error': '客户名不能为空'}), 400
-    if len(customer_name) > 50:
-        return jsonify({'error': '客户名不能超过50个字符'}), 400
-    
-    # 电话校验
-    phone = data.get('phone', '').strip()
-    if not phone:
-        return jsonify({'error': '电话号码不能为空'}), 400
-    if not phone.isdigit() or len(phone) != 11:
-        return jsonify({'error': '请输入有效的11位手机号码'}), 400
-    
-    # 地址校验
-    address = data.get('address', '').strip()
-    if not address:
-        return jsonify({'error': '收货地址不能为空'}), 400
-    if len(address) > 200:
-        return jsonify({'error': '地址不能超过200个字符'}), 400
-    
-    # 接单日期校验
-    order_date = data.get('order_date')
-    if not order_date:
-        return jsonify({'error': '接单日期不能为空'}), 400
-    date_err = validate_date(order_date, '接单日期')
-    if date_err:
-        return date_err
-    
-    # 发货日期校验
-    ship_date = data.get('ship_date', '')
-    if ship_date and ship_date < order_date:
-        return jsonify({'error': '发货日期不能早于接单日期'}), 400
-    
-    # 运单号校验
-    tracking_number = data.get('tracking_number', '').strip()
-    if tracking_number and len(tracking_number) > 50:
-        return jsonify({'error': '运单号不能超过50个字符'}), 400
-    
-    # 备注校验
-    remark = data.get('remark', '').strip()
-    if remark and len(remark) > 50:
-        return jsonify({'error': '备注不能超过50个字符'}), 400
-
-    # 数量校验
-    quantity = data.get('quantity', 0)
-    if not isinstance(quantity, int) or quantity < 0:
-        return jsonify({'error': '数量必须是正整数'}), 400
-
-    # 支付金额校验
-    payment_amount = data.get('payment_amount', 0.00)
-    try:
-        payment_amount = float(payment_amount)
-        if payment_amount < 0:
-            return jsonify({'error': '支付金额不能为负数'}), 400
-        payment_amount = round(payment_amount, 2)
-    except (ValueError, TypeError):
-        return jsonify({'error': '支付金额必须是数字'}), 400
-
-    # 状态校验
-    status = data.get('status', '未发货')
-    if status not in ['已发货', '未发货']:
-        return jsonify({'error': '状态必须是已发货或未发货'}), 400
+    err, validated = _validate_kiwi_sale_data(data)
+    if err:
+        return err
+    customer_name = validated['customer_name']
+    phone = validated['phone']
+    address = validated['address']
+    order_date = validated['order_date']
+    tracking_number = validated['tracking_number']
+    remark = validated['remark']
+    quantity = validated['quantity']
+    payment_amount = validated['payment_amount']
+    status = validated['status']
 
     # 数据库操作
     db = get_db()
@@ -1220,6 +1259,8 @@ def batch_delete_kiwi_sales():
         return jsonify({'error': '单次删除不能超过100条记录'}), 400
     db = get_db()
     cursor = db.cursor()
+    if not all(isinstance(i, int) for i in ids):
+        return jsonify({'error': 'ID列表必须全部为整数'}), 400
     placeholders = ','.join(['?'] * len(ids))
     cursor.execute(f'DELETE FROM kiwi_sales WHERE id IN ({placeholders}) AND user_id=?', ids + [g.user_id])
     deleted = cursor.rowcount
@@ -1450,8 +1491,11 @@ def add_overtime_record():
     else:
         duration = calculate_overtime_duration(overtime_type, start_time, end_time)
 
-    cursor.execute('INSERT INTO overtime_records (overtime_type, date, start_time, end_time, duration, remark, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                   (overtime_type, date, start_time, end_time, duration, remark, g.user_id))
+    try:
+        cursor.execute('INSERT INTO overtime_records (overtime_type, date, start_time, end_time, duration, remark, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                       (overtime_type, date, start_time, end_time, duration, remark, g.user_id))
+    except sqlite3.IntegrityError:
+        return jsonify({'error': '该日期已存在加班记录'}), 400
     err = safe_commit(db)
     if err:
         return err
@@ -1555,6 +1599,8 @@ def batch_delete_overtime_records():
         return jsonify({'error': '单次删除不能超过100条记录'}), 400
     db = get_db()
     cursor = db.cursor()
+    if not all(isinstance(i, int) for i in ids):
+        return jsonify({'error': 'ID列表必须全部为整数'}), 400
     placeholders = ','.join(['?'] * len(ids))
     cursor.execute(f'DELETE FROM overtime_records WHERE id IN ({placeholders}) AND user_id=?', ids + [g.user_id])
     deleted = cursor.rowcount
@@ -1743,7 +1789,7 @@ def export_expenses():
                 yield line.encode('gbk')
                 output.seek(0)
                 output.truncate(0)
-                writer.writerow([r['id'], r['category'], float(r['amount']), r['date'], r['remark'] or ''])
+                writer.writerow([sanitize_csv_field(r['id']), sanitize_csv_field(r['category']), float(r['amount']), sanitize_csv_field(r['date']), sanitize_csv_field(r['remark'] or '')])
             final = output.getvalue()
             if final:
                 yield final.encode('gbk')
@@ -1806,19 +1852,20 @@ def export_kiwi_sales():
                 output.truncate(0)
                 writer.writerow([
                     idx + 1,
-                    r['customer_name'],
-                    r['phone'],
-                    r['address'],
-                    r['order_date'] or '',
-                    r['status'] or '未发货',
-                    r['tracking_number'] or '',
-                    r['remark'] or '',
+                    sanitize_csv_field(r['customer_name']),
+                    sanitize_csv_field(r['phone']),
+                    sanitize_csv_field(r['address']),
+                    sanitize_csv_field(r['order_date'] or ''),
+                    sanitize_csv_field(r['status'] or '未发货'),
+                    sanitize_csv_field(r['tracking_number'] or ''),
+                    sanitize_csv_field(r['remark'] or ''),
                     r['quantity'] or 0,
                     (r['payment_amount'] or 0)
                 ])
-                yield output.getvalue().encode('gbk')
-                output.seek(0)
-                output.truncate(0)
+
+            final = output.getvalue()
+            if final:
+                yield final.encode('gbk')
 
         safe_filename = f"kiwi_sales_{datetime.now(timezone.utc).strftime('%Y%m%d')}.csv"
         response = Response(stream_with_context(generate_csv()), mimetype='text/csv;charset=gbk')
@@ -1932,6 +1979,8 @@ def batch_delete_expenses():
         return jsonify({'error': '单次删除不能超过100条记录'}), 400
     db = get_db()
     cursor = db.cursor()
+    if not all(isinstance(i, int) for i in ids):
+        return jsonify({'error': 'ID列表必须全部为整数'}), 400
     placeholders = ','.join(['?'] * len(ids))
     cursor.execute(f'DELETE FROM expenses WHERE id IN ({placeholders}) AND user_id=?', ids + [g.user_id])
     deleted = cursor.rowcount
@@ -2037,9 +2086,9 @@ def get_expenses_stats_monthly():
 
 if __name__ == '__main__':
     init_db()
-    print("=" * 60)
-    print("  Echo 已启动！")
-    print("  访问地址: http://localhost:5001")
-    print("  按 Ctrl+C 停止服务")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("  Echo started!")
+    logger.info("  Access URL: http://localhost:5001")
+    logger.info("  Press Ctrl+C to stop")
+    logger.info("=" * 60)
     app.run(host='0.0.0.0', port=5001, debug=False, threaded=True)

@@ -1,86 +1,35 @@
-# CLAUDE.md
+# 智慧管理中心 (Echo) — 单用户 Flask + 原生JS SPA，SQLite
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
-## Project Overview
-
-"智慧管理中心" (Echo) — a single-user Flask web app combining personal knowledge base, kiwi-sales order management, overtime tracking, and expense accounting. Version v2.2.1, MIT license.
-
-## Commands
-
-### Run the app
-```bash
-python app.py          # starts on http://0.0.0.0:5001
-```
-Or on Windows: `start.bat` (sets UTF-8 encoding via `chcp 65001`, installs deps, runs app)
-
-### Install dependencies
-```bash
+## 命令
+python app.py              # :5001
 pip install -r requirements.txt
-```
+pytest -m p0 -q            # P0 smoke（需服务运行中，最快反馈）
+pytest tests/test_overtime.py -q  # 单模块回归
+pytest -q --cov --cov-report=term-missing  # 全量 + 覆盖率（发版前）
 
-### Tests
-```bash
-python test_api.py     # integration smoke test — requires running server at localhost:5001
-```
-No pytest suite exists. When adding pytest: `python -m pytest path/to/test_file.py::test_name`
+## 关键约束（违反则故障）
+- 端口 5001（非 5000）
+- SQLite 占位符 ?（非 %s）
+- CSV 导出必须 GBK + UTF-8 BOM，Content-Type: text/csv; charset=gbk
+- init_db() 只接受 ALTER TABLE ADD COLUMN，禁止改已有 CREATE TABLE；仅 __main__ 时运行
+- JWT 7天过期；路由 @login_required；所有查询必加 WHERE user_id=?
+- 上传文件存 static/uploads/，扩展名白名单 png/jpg/jpeg/gif/webp
 
-No linter configured. If adding one, prefer ruff/flake8/black.
+## 业务规则
+- 加班计算：工作日 19:00-23:59 起算；周末 09:00-23:00 自动扣午休 2h（12:00-14:00）；同日唯一约束
 
-## Architecture
+## 前后端入口
+- 后端 app.py（单文件 38 路由，get_db() 存 g，rows = sqlite3.Row）
+- 前端 static/index.html（单文件 SPA，API_URL='/api'，token 存 localStorage key=token，REPORT_PAGE_SIZE=10）
 
-**Single-file monolith** — the defining pattern of this project:
+## 搜索入口
+init_db, generate_token, login_required, UPLOAD_FOLDER, REPORT_PAGE_SIZE, calculate_overtime_duration, getAuthHeaders
 
-- **Backend**: `app.py` (~1532 lines) — all 38 routes, auth, DB init, domain logic in one file. No blueprints or modules.
-- **Frontend**: `static/index.html` (~5811 lines) — all UI, routing, API calls in one HTML file. No SPA framework, no build step. Vanilla JS with `fetch()`.
-
-### Key backend patterns
-- SQLite via raw `sqlite3` (no ORM). `get_db()` stores connection on Flask's `g`; rows returned as `sqlite3.Row`.
-- SQLite placeholder is `?` (not `%s`).
-- `init_db()` is the schema updater — idempotent, uses `PRAGMA table_info` + `ALTER TABLE ADD COLUMN` for new columns. **Do NOT edit existing `CREATE TABLE` statements**; append `ALTER TABLE` blocks instead.
-- `init_db()` only runs inside `if __name__ == '__main__'` — importing app does NOT create tables.
-- `close_db` is registered via `@app.teardown_appcontext` (fixed in v2.2.0 — previously missing, caused DB lock errors).
-
-### Key frontend patterns
-- `API_URL = '/api'` constant, `getAuthHeaders()` helper for Bearer token.
-- Frontend stores JWT token in `localStorage` under key `token`.
-- `REPORT_PAGE_SIZE` constant (default 10) for sales-report pagination in `static/index.html`.
-
-### Auth pattern
-- JWT tokens (7-day expiry) via `pyjwt`, passwords hashed via `passlib.hash.pbkdf2_sha256`.
-- `@login_required` decorator reads `Authorization: Bearer <token>`, sets `g.user_id`.
-- All data tables carry `user_id` FK; queries filter by `g.user_id` for user isolation.
-
-### Domain modules (all in app.py)
-- Auth: `/api/auth/*`
-- Articles/Knowledge base: `/api/articles/*`, `/api/categories/*`, `/api/tags`, `/api/stats`
-- Kiwi sales: `/api/kiwi-sales/*`, `/api/kiwi-sales-report`, `/api/kiwi-sales/export`
-- Overtime: `/api/overtime/*`, `/api/overtime/stats`
-- Expenses: `/api/expenses/*`, `/api/expenses/stats`, `/api/expenses/export`
-- Upload: `/api/upload`
-
-## Conventions and Gotchas
-
-- **Port is 5001** — NOT 5000.
-- **CSV exports use GBK encoding** with UTF-8 BOM for Windows Excel compatibility. Content-Type is `text/csv; charset=gbk`. Do NOT switch to plain UTF-8 (causes mojibake in Excel).
-- **SECRET_KEY is hardcoded** in `app.py`. For production, set via environment variable and update app.py to read `os.environ.get('SECRET_KEY')`.
-- **Overtime duration calculation** has domain-specific rules:
-  - Weekday overtime: starts from 19:00, end time range 19:00-23:59
-  - Weekend overtime: 09:00-23:00, auto-deducts 12:00-14:00 lunch break (2 hours)
-  - Same-day uniqueness constraint
-- **Uploads**: saved to `static/uploads/`, filenames secured with `werkzeug.utils.secure_filename`. Allowed extensions: png, jpg, jpeg, gif, webp.
-- **Default categories seeded** (技术, 生活, 学习, 工作) only when DB is empty.
-- **`auto_start.bat` and `setup_autostart.ps1`** have stale hardcoded paths — update before use.
-- **Helper scripts** (`list_tables.py`, `query_tables.py`, etc.) use relative DB paths — run from repo root.
-- When adding features, prefer extracting code into modules (e.g., `app/auth.py`, `app/articles.py`) to keep diffs small and safe, though the current pattern is single-file.
-
-## Design Docs
-
-- `docs/ARCHITECTURE.md` — auth flow diagrams, module dependency charts, data flow
-- `docs/PRD.md` — product requirements
-- `docs/INTERACTION_DESIGN.md` — interaction design specs
-- `Test_Team/` (gitignored) — 301 manual test cases across 5 modules
-
-## Useful Search Terms
-
-`init_db`, `generate_token`, `login_required`, `UPLOAD_FOLDER`, `REPORT_PAGE_SIZE`, `calculate_overtime_duration`, `getAuthHeaders`
+## 设计文档
+- `docs/BUG_FIX_LESSONS.md` — Bug 修复经验沉淀（v2.1→v2.5.4 全部修复）
+- `docs/TOKEN_OPTIMIZATION.md` — Claude Code token 优化指南（CLAUDE.md 瘦身、提示词规范、工具调度、工作流瘦身）
+- `docs/TEST_TOKEN_OPTIMIZATION.md` — 测试架构师 token 优化（测试文件架构、测试提示词模板、调试循环优化、手工用例管理）
+- `docs/TEST_OPTIMIZATION_MASTER.md` — 测试优化权威指南（资产清理、架构重构、配置标准化、覆盖度补齐、执行策略、UI测试、数据工厂、CI集成）
+- `docs/ARCHITECTURE.md` — 架构图集
+- `docs/PRD.md` — 产品需求
+- `docs/INTERACTION_DESIGN.md` — 交互设计

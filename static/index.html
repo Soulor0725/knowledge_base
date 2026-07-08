@@ -1755,6 +1755,7 @@
                         <option value="电费">电费</option>
                         <option value="话费">话费</option>
                         <option value="网费">网费</option>
+                        <option value="暖气费">暖气费</option>
                         <option value="香烟">香烟</option>
                         <option value="菜肉米面油">菜肉米面油</option>
                         <option value="交通">交通</option>
@@ -2474,7 +2475,7 @@
                 articleList.innerHTML = `
                     <div class="empty-state">
                         <h3>加载失败</h3>
-                        <p>${error.message}</p>
+                        <p>${escapeHtml(error.message)}</p>
                         <button class="btn btn-secondary" onclick="loadArticles()" style="margin-top: 16px;">重试</button>
                     </div>
                 `;
@@ -2524,7 +2525,7 @@
                     </div>
                     <div class="main-article-index" style="flex: 1; text-align: center; color: #94a3b8; font-size: 12px;">${articleIndex}</div>
                     <div class="main-article-title" onclick="viewArticle(${article.id})" style="flex: 1.5; cursor: pointer; color: #e2e8f0; font-size: 14px; font-weight: 500; padding: 0 5px; text-align: left;">${escapeHtml(article.title)}</div>
-                    <div class="main-article-category" style="flex: 1; color: #94a3b8; font-size: 12px; text-align: center;">${article.category || '未分类'}</div>
+                    <div class="main-article-category" style="flex: 1; color: #94a3b8; font-size: 12px; text-align: center;">${escapeHtml(article.category || '未分类')}</div>
                     <div class="main-article-date" style="flex: 1; color: #94a3b8; font-size: 12px; text-align: center;">${formatDate(article.updated_at)}</div>
                     <div class="main-article-views-count" style="flex: 1; color: #94a3b8; font-size: 12px; text-align: center;">
                         <i class="fa fa-eye" style="font-size: 11px; margin-right: 2px;"></i> ${article.views || 0}
@@ -2828,7 +2829,7 @@
                 articleList.innerHTML = `
                     <div class="empty-state">
                         <h3>搜索失败</h3>
-                        <p>${error.message}</p>
+                        <p>${escapeHtml(error.message)}</p>
                     </div>
                 `;
             }
@@ -3060,13 +3061,13 @@
                     <div class="main-article-phone" style="flex: 1.2; color: #94a3b8; font-size: 12px; text-align: left; padding: 0 5px;">${escapeHtml(sale.phone)}</div>
                     <div class="main-article-address" style="flex: 2; color: #94a3b8; font-size: 12px; text-align: left; padding: 0 5px; word-break: break-word;">${escapeHtml(sale.address)}</div>
                     <div class="main-article-order-date" style="flex: 1; color: #94a3b8; font-size: 12px; text-align: center; white-space: nowrap;">${sale.order_date}</div>
-                    <div class="main-article-status" style="flex: 1; text-align: center;"><span class="status-pill ${(sale.status === '已发货') ? 'shipped' : 'unshipped'}">${sale.status || '未发货'}</span></div>
+                    <div class="main-article-status" style="flex: 1; text-align: center;"><span class="status-pill ${(sale.status === '已发货') ? 'shipped' : 'unshipped'}">${escapeHtml(sale.status || '未发货')}</span></div>
                     <div class="main-article-tracking" style="flex: 1.5; font-size: 12px; text-align: left; padding: 0 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                         ${sale.tracking_number ? `<a href="https://www.kuaidi100.com/?nu=${encodeURIComponent(sale.tracking_number)}" target="_blank" style="color: #60a5fa; text-decoration: none; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'" title="点击查看物流信息"><i class="fa fa-truck" style="font-size: 10px;"></i>${escapeHtml(sale.tracking_number)}</a>` : '<span style="color: #94a3b8;">-</span>'}
                     </div>
-                    <div class="main-article-remark" style="flex: 0.8; color: #94a3b8; font-size: 12px; text-align: center;">${sale.remark || '-'}</div>
+                    <div class="main-article-remark" style="flex: 0.8; color: #94a3b8; font-size: 12px; text-align: center;">${escapeHtml(sale.remark || '-')}</div>
                     <div class="main-article-quantity" style="flex: 0.6; color: #94a3b8; font-size: 12px; text-align: center;">${sale.quantity || 0}</div>
-                    <div class="main-article-payment" style="flex: 0.8; color: #2dd4bf; font-size: 12px; font-weight: 600; text-align: center;">${(sale.payment_amount || 0).toFixed(2)}</div>
+                    <div class="main-article-payment" style="flex: 0.8; color: #3b82f6; font-size: 12px; font-weight: 600; text-align: center;">${(sale.payment_amount || 0).toFixed(2)}</div>
                     <div class="main-article-actions" style="flex: 0.8; display: flex; gap: 6px; justify-content: center;">
                         <button class="action-icon-btn edit" onclick="editKiwiSale(${sale.id})" title="编辑订单"><i class="fa fa-pencil"></i></button>
                         <button class="action-icon-btn delete" onclick="deleteKiwiSale(${sale.id})" title="删除订单"><i class="fa fa-trash"></i></button>
@@ -3154,6 +3155,7 @@
         let kiwiReportTotalCustomers = 0;
         
         async function loadKiwiReport() {
+            let data = null;
             try {
                 const yearSelect = document.getElementById('kiwiReportYear');
                 const year = yearSelect ? yearSelect.value : new Date().getFullYear();
@@ -3161,40 +3163,41 @@
                     headers: getAuthHeaders()
                 });
                 if (!response.ok) throw new Error('加载报表失败');
-                const data = await response.json();
+                data = await response.json();
                 kiwiReportData = data.report || [];
                 kiwiReportPage = data.page || 1;
                 kiwiReportPageSize = data.page_size || 10;
                 kiwiReportTotalPages = data.total_pages || 1;
                 kiwiReportTotalCustomers = data.total_customers || 0;
-                renderKiwiReportStats(data.summary);
-                renderKiwiReport();
             } catch (error) {
                 console.error('加载报表失败:', error);
-                const el = document.getElementById('kiwiReportStats');
-                if (el) el.innerHTML = '<div class="error-message">加载失败，请刷新重试</div>';
+                kiwiReportData = [];
             }
+            // 无论成功失败，都渲染统计和列表（无数据时显示 0 和空列表）
+            renderKiwiReportStats(data ? data.summary : null);
+            renderKiwiReport();
         }
         
         function renderKiwiReportStats(summary) {
             const el = document.getElementById('kiwiReportStats');
-            if (!el || !summary) return;
+            if (!el) return;
+            const s = summary || {};
             el.innerHTML = `
                 <div style="display:flex;gap:16px;flex-wrap:wrap;">
                     <div style="flex:1;min-width:140px;background:rgba(124,252,0,0.1);border:1px solid rgba(124,252,0,0.2);border-radius:10px;padding:16px;text-align:center;">
-                        <div style="font-size:24px;font-weight:700;color:#7CFC00;">${summary['5斤装'].quantity || 0}</div>
+                        <div style="font-size:24px;font-weight:700;color:#a855f7;">${(s['5斤装'] || {}).quantity || 0}</div>
                         <div style="font-size:12px;color:#94a3b8;margin-top:4px;">5斤装</div>
                     </div>
-                    <div style="flex:1;min-width:140px;background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.2);border-radius:10px;padding:16px;text-align:center;">
-                        <div style="font-size:24px;font-weight:700;color:#3b82f6;">${summary['10斤装'].quantity || 0}</div>
+                    <div style="flex:1;min-width:140px;background:rgba(6,182,212,0.1);border:1px solid rgba(6,182,212,0.2);border-radius:10px;padding:16px;text-align:center;">
+                        <div style="font-size:24px;font-weight:700;color:#06b6d4;">${(s['10斤装'] || {}).quantity || 0}</div>
                         <div style="font-size:12px;color:#94a3b8;margin-top:4px;">10斤装</div>
                     </div>
-                    <div style="flex:1;min-width:140px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.2);border-radius:10px;padding:16px;text-align:center;">
-                        <div style="font-size:24px;font-weight:700;color:#22c55e;">${summary.total_quantity || 0}</div>
+                    <div style="flex:1;min-width:140px;background:rgba(139,92,246,0.1);border:1px solid rgba(139,92,246,0.2);border-radius:10px;padding:16px;text-align:center;">
+                        <div style="font-size:24px;font-weight:700;color:#8b5cf6;">${s.total_quantity || 0}</div>
                         <div style="font-size:12px;color:#94a3b8;margin-top:4px;">总数量</div>
                     </div>
-                    <div style="flex:1;min-width:140px;background:rgba(45,212,191,0.1);border:1px solid rgba(45,212,191,0.2);border-radius:10px;padding:16px;text-align:center;">
-                        <div style="font-size:24px;font-weight:700;color:#2dd4bf;">¥${(summary.total_amount || 0).toFixed(2)}</div>
+                    <div style="flex:1;min-width:140px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.2);border-radius:10px;padding:16px;text-align:center;">
+                        <div style="font-size:24px;font-weight:700;color:#22c55e;">¥${(s.total_amount || 0).toFixed(2)}</div>
                         <div style="font-size:12px;color:#94a3b8;margin-top:4px;">总金额</div>
                     </div>
                 </div>
@@ -3204,110 +3207,103 @@
         function renderKiwiReport() {
             const container = document.getElementById('kiwiReportContent');
             if (!container) return;
-            
-            if (kiwiReportData.length === 0) {
-                container.innerHTML = '<div style="padding: 40px; text-align: center; color: #64748b; font-size: 14px;">暂无报表数据</div>';
-                return;
-            }
-            
-            // 计算规格汇总
-            const specSummary = {};
-            let totalGrandAmount = 0;
-            
-            kiwiReportData.forEach(item => {
-                const spec = item.remark || '未分类';
-                if (!specSummary[spec]) {
-                    specSummary[spec] = {
-                        quantity: 0,
-                        amount: 0
-                    };
-                }
-                specSummary[spec].quantity += item.total_quantity || 0;
-                specSummary[spec].amount += item.total_amount || 0;
-                totalGrandAmount += item.total_amount || 0;
-            });
-            
-            // 计算总数量
-            let totalGrandQuantity = 0;
-            Object.values(specSummary).forEach(spec => {
-                totalGrandQuantity += spec.quantity;
-            });
-            
-            // 按客户名分组汇总
-            const grouped = {};
-            kiwiReportData.forEach(item => {
-                if (!grouped[item.customer_name]) {
-                    grouped[item.customer_name] = {
-                        customer_name: item.customer_name,
-                        items: [],
-                        total_quantity: 0,
-                        total_amount: 0
-                    };
-                }
-                grouped[item.customer_name].items.push(item);
-                grouped[item.customer_name].total_quantity += item.total_quantity || 0;
-                grouped[item.customer_name].total_amount += item.total_amount || 0;
-            });
-            
+
+            // 表头始终显示
             let html = '';
-            
-            // 表格容器
             html += `<div style="background:rgba(30,41,59,0.8);border-radius:12px;border:1px solid rgba(148,163,184,0.1);overflow:hidden;">`;
             html += `<table style="width:100%;border-collapse:collapse;">`;
-            
-            // 表头
             html += `<thead><tr style="background:rgba(15,23,42,0.5);">`;
-            html += `<th style="padding:12px 16px;color:#94a3b8;font-size:15px;font-weight:700;text-align:center;border-bottom:1px solid rgba(148,163,184,0.1);width:10%;">序号</th>`;
-            html += `<th style="padding:12px 16px;color:#94a3b8;font-size:15px;font-weight:700;text-align:left;border-bottom:1px solid rgba(148,163,184,0.1);width:25%;">姓名</th>`;
-            html += `<th style="padding:12px 16px;color:#7CFC00;font-size:15px;font-weight:700;text-align:center;border-bottom:1px solid rgba(148,163,184,0.1);width:15%;">5斤装</th>`;
-            html += `<th style="padding:12px 16px;color:#3b82f6;font-size:15px;font-weight:700;text-align:center;border-bottom:1px solid rgba(148,163,184,0.1);width:15%;">10斤装</th>`;
-            html += `<th style="padding:12px 16px;color:#94a3b8;font-size:15px;font-weight:700;text-align:center;border-bottom:1px solid rgba(148,163,184,0.1);width:15%;">总数量</th>`;
-            html += `<th style="padding:12px 16px;color:#94a3b8;font-size:15px;font-weight:700;text-align:right;border-bottom:1px solid rgba(148,163,184,0.1);width:20%;">总金额</th>`;
+            html += `<th style="padding:12px 16px;color:#94a3b8;font-size:15px;font-weight:700;text-align:center;border-bottom:1px solid rgba(148,163,184,0.1);width:16.67%;">序号</th>`;
+            html += `<th style="padding:12px 16px;color:#94a3b8;font-size:15px;font-weight:700;text-align:left;border-bottom:1px solid rgba(148,163,184,0.1);width:16.67%;">姓名</th>`;
+            html += `<th style="padding:12px 16px;color:#a855f7;font-size:15px;font-weight:700;text-align:center;border-bottom:1px solid rgba(148,163,184,0.1);width:16.67%;">5斤装</th>`;
+            html += `<th style="padding:12px 16px;color:#06b6d4;font-size:15px;font-weight:700;text-align:center;border-bottom:1px solid rgba(148,163,184,0.1);width:16.67%;">10斤装</th>`;
+            html += `<th style="padding:12px 16px;color:#8b5cf6;font-size:15px;font-weight:700;text-align:center;border-bottom:1px solid rgba(148,163,184,0.1);width:16.67%;">总数量</th>`;
+            html += `<th style="padding:12px 16px;color:#22c55e;font-size:15px;font-weight:700;text-align:right;border-bottom:1px solid rgba(148,163,184,0.1);width:16.67%;">总金额</th>`;
             html += `</tr></thead>`;
-            
-            // 数据行
-            html += `<tbody>`;
-            Object.values(grouped).forEach((customer, index) => {
-                let qty5 = 0, qty10 = 0;
-                customer.items.forEach(item => {
-                    if (item.remark === '5斤装') qty5 += item.total_quantity || 0;
-                    if (item.remark === '10斤装') qty10 += item.total_quantity || 0;
+
+            if (kiwiReportData.length === 0) {
+                html += `<tbody><tr><td colspan="6" style="padding: 40px; text-align: center; color: #64748b; font-size: 14px;">暂无报表数据</td></tr></tbody>`;
+            } else {
+                // 计算规格汇总
+                const specSummary = {};
+                let totalGrandAmount = 0;
+
+                kiwiReportData.forEach(item => {
+                    const spec = item.remark || '未分类';
+                    if (!specSummary[spec]) {
+                        specSummary[spec] = {
+                            quantity: 0,
+                            amount: 0
+                        };
+                    }
+                    specSummary[spec].quantity += item.total_quantity || 0;
+                    specSummary[spec].amount += item.total_amount || 0;
+                    totalGrandAmount += item.total_amount || 0;
                 });
-                const bgColor = index % 2 === 0 ? 'transparent' : 'rgba(148,163,184,0.03)';
-                html += `<tr style="background:${bgColor};transition:background 0.2s;" onmouseover="this.style.background='rgba(96,165,250,0.1)'" onmouseout="this.style.background='${bgColor}'">`;
-                html += `<td style="padding:10px 16px;color:#94a3b8;font-size:14px;text-align:center;border-bottom:1px solid rgba(148,163,184,0.05);">${index + 1}</td>`;
-                html += `<td style="padding:10px 16px;color:#e2e8f0;font-size:14px;text-align:left;border-bottom:1px solid rgba(148,163,184,0.05);">${escapeHtml(customer.customer_name)}</td>`;
-                html += `<td style="padding:10px 16px;color:#7CFC00;font-size:14px;text-align:center;border-bottom:1px solid rgba(148,163,184,0.05);font-weight:600;">${qty5 || '-'}</td>`;
-                html += `<td style="padding:10px 16px;color:#3b82f6;font-size:14px;text-align:center;border-bottom:1px solid rgba(148,163,184,0.05);font-weight:600;">${qty10 || '-'}</td>`;
-                html += `<td style="padding:10px 16px;color:#22c55e;font-size:14px;text-align:center;border-bottom:1px solid rgba(148,163,184,0.05);">${customer.total_quantity}</td>`;
-                html += `<td style="padding:10px 16px;color:#22c55e;font-size:14px;text-align:right;border-bottom:1px solid rgba(148,163,184,0.05);">¥${customer.total_amount.toFixed(2)}</td>`;
-                html += `</tr>`;
-            });
-            html += `</tbody></table></div>`;
-            
-            // 添加分页控件（参考加班记录风格）
-            const totalPages = kiwiReportTotalPages || Math.ceil(kiwiReportTotalCustomers / kiwiReportPageSize || 1);
-            html += `<div style="display:flex;align-items:center;gap:8px;padding:12px;background:rgba(30,41,59,0.5);border-radius:8px;border:1px solid rgba(148,163,184,0.1);">`;
+
+                // 按客户名分组汇总
+                const grouped = {};
+                kiwiReportData.forEach(item => {
+                    if (!grouped[item.customer_name]) {
+                        grouped[item.customer_name] = {
+                            customer_name: item.customer_name,
+                            items: [],
+                            total_quantity: 0,
+                            total_amount: 0
+                        };
+                    }
+                    grouped[item.customer_name].items.push(item);
+                    grouped[item.customer_name].total_quantity += item.total_quantity || 0;
+                    grouped[item.customer_name].total_amount += item.total_amount || 0;
+                });
+
+                html += `<tbody>`;
+                Object.values(grouped).forEach((customer, index) => {
+                    let qty5 = 0, qty10 = 0;
+                    customer.items.forEach(item => {
+                        if (item.remark === '5斤装') qty5 += item.total_quantity || 0;
+                        if (item.remark === '10斤装') qty10 += item.total_quantity || 0;
+                    });
+                    const bgColor = index % 2 === 0 ? 'transparent' : 'rgba(148,163,184,0.03)';
+                    html += `<tr style="background:${bgColor};transition:background 0.2s;" onmouseover="this.style.background='rgba(96,165,250,0.1)'" onmouseout="this.style.background='${bgColor}'">`;
+                    html += `<td style="padding:10px 16px;color:#94a3b8;font-size:14px;text-align:center;border-bottom:1px solid rgba(148,163,184,0.05);width:16.67%;">${index + 1}</td>`;
+                    html += `<td style="padding:10px 16px;color:#e2e8f0;font-size:14px;text-align:left;border-bottom:1px solid rgba(148,163,184,0.05);width:16.67%;">${escapeHtml(customer.customer_name)}</td>`;
+                    html += `<td style="padding:10px 16px;color:#a855f7;font-size:14px;text-align:center;border-bottom:1px solid rgba(148,163,184,0.05);font-weight:600;width:16.67%;">${qty5 || '-'}</td>`;
+                    html += `<td style="padding:10px 16px;color:#06b6d4;font-size:14px;text-align:center;border-bottom:1px solid rgba(148,163,184,0.05);font-weight:600;width:16.67%;">${qty10 || '-'}</td>`;
+                    html += `<td style="padding:10px 16px;color:#8b5cf6;font-size:14px;text-align:center;border-bottom:1px solid rgba(148,163,184,0.05);width:16.67%;">${customer.total_quantity}</td>`;
+                    html += `<td style="padding:10px 16px;color:#22c55e;font-size:14px;text-align:right;border-bottom:1px solid rgba(148,163,184,0.05);width:16.67%;">¥${customer.total_amount.toFixed(2)}</td>`;
+                    html += `</tr>`;
+                });
+                html += `</tbody>`;
+            }
+
+            html += `</table></div>`;
+
+            // 添加分页控件（有数据时才显示）
+            if (kiwiReportData.length > 0) {
+                const totalPages = kiwiReportTotalPages || Math.ceil(kiwiReportTotalCustomers / kiwiReportPageSize || 1);
+                html += `<div style="display:flex;align-items:center;gap:8px;padding:12px;background:rgba(30,41,59,0.5);border-radius:8px;border:1px solid rgba(148,163,184,0.1);">`;
                 html += `<div style="display:flex;align-items:center;gap:8px;margin-right:12px;"><span style="color:#94a3b8;font-size:12px;">每页</span><select onchange="changeKiwiReportPageSize(this.value)" style="padding:4px 8px;border:1px solid rgba(148,163,184,0.2);border-radius:4px;background:rgba(30,41,59,0.8);color:#cbd5e1;font-size:12px;">`;
                 [5,10,15].forEach(s => { html += `<option value="${s}" ${kiwiReportPageSize===s?'selected':''}>${s}</option>`; });
                 html += `</select><span style="color:#94a3b8;font-size:12px;">条</span></div>`;
-                
-            if (totalPages > 1) {
-                html += `<button onclick="goToReportPage(1)" ${kiwiReportPage===1?'disabled':''} style="padding:6px 12px;border:1px solid rgba(148,163,184,0.2);background:rgba(30,41,59,0.8);color:#cbd5e1;border-radius:6px;cursor:pointer;font-size:12px;${kiwiReportPage===1?'opacity:0.5;cursor:not-allowed;':''}">首页</button>`;
-                html += `<button onclick="goToReportPage(${kiwiReportPage - 1})" ${kiwiReportPage === 1 ? 'disabled' : ''} style="padding:6px 12px;border:1px solid rgba(148,163,184,0.2);background:rgba(30,41,59,0.8);color:#cbd5e1;border-radius:6px;cursor:pointer;font-size:12px;${kiwiReportPage === 1 ? 'opacity:0.5;cursor:not-allowed;':''}">上一页</button>`;
-                const showPages = 5;
-                let startPage = Math.max(1, kiwiReportPage - Math.floor(showPages / 2));
-                let endPage = Math.min(totalPages, startPage + showPages - 1);
-                if (endPage - startPage < showPages - 1) startPage = Math.max(1, endPage - showPages + 1);
-                for (let i = startPage; i <= endPage; i++) {
-                    html += `<button onclick="goToReportPage(${i})" style="padding:6px 12px;border:1px solid ${kiwiReportPage===i?'rgba(96,165,250,0.5)':'rgba(148,163,184,0.2)'};background:${kiwiReportPage===i?'rgba(96,165,250,0.15)':'rgba(30,41,59,0.8)'};color:${kiwiReportPage===i?'#60a5fa':'#cbd5e1'};border-radius:6px;cursor:pointer;font-size:12px;">${i}</button>`;
+
+                if (totalPages > 1) {
+                    html += `<button onclick="goToReportPage(1)" ${kiwiReportPage===1?'disabled':''} style="padding:6px 12px;border:1px solid rgba(148,163,184,0.2);background:rgba(30,41,59,0.8);color:#cbd5e1;border-radius:6px;cursor:pointer;font-size:12px;${kiwiReportPage===1?'opacity:0.5;cursor:not-allowed;':''}">首页</button>`;
+                    html += `<button onclick="goToReportPage(${kiwiReportPage - 1})" ${kiwiReportPage === 1 ? 'disabled' : ''} style="padding:6px 12px;border:1px solid rgba(148,163,184,0.2);background:rgba(30,41,59,0.8);color:#cbd5e1;border-radius:6px;cursor:pointer;font-size:12px;${kiwiReportPage === 1 ? 'opacity:0.5;cursor:not-allowed;':''}">上一页</button>`;
+                    const showPages = 5;
+                    let startPage = Math.max(1, kiwiReportPage - Math.floor(showPages / 2));
+                    let endPage = Math.min(totalPages, startPage + showPages - 1);
+                    if (endPage - startPage < showPages - 1) startPage = Math.max(1, endPage - showPages + 1);
+                    for (let i = startPage; i <= endPage; i++) {
+                        html += `<button onclick="goToReportPage(${i})" style="padding:6px 12px;border:1px solid ${kiwiReportPage===i?'rgba(96,165,250,0.5)':'rgba(148,163,184,0.2)'};background:${kiwiReportPage===i?'rgba(96,165,250,0.15)':'rgba(30,41,59,0.8)'};color:${kiwiReportPage===i?'#60a5fa':'#cbd5e1'};border-radius:6px;cursor:pointer;font-size:12px;">${i}</button>`;
+                    }
+                    html += `<button onclick="goToReportPage(${kiwiReportPage + 1})" ${kiwiReportPage === totalPages ? 'disabled' : ''} style="padding:6px 12px;border:1px solid rgba(148,163,184,0.2);background:rgba(30,41,59,0.8);color:#cbd5e1;border-radius:6px;cursor:pointer;font-size:12px;${kiwiReportPage===totalPages?'opacity:0.5;cursor:not-allowed;':''}">下一页</button>`;
+                    html += `<button onclick="goToReportPage(${totalPages})" ${kiwiReportPage === totalPages ? 'disabled' : ''} style="padding:6px 12px;border:1px solid rgba(148,163,184,0.2);background:rgba(30,41,59,0.8);color:#cbd5e1;border-radius:6px;cursor:pointer;font-size:12px;${kiwiReportPage===totalPages?'opacity:0.5;cursor:not-allowed;':''}">末页</button>`;
+                    html += `<span style="color:#94a3b8;font-size:12px;margin-left:12px;">共 ${kiwiReportTotalCustomers} 个客户，第 ${kiwiReportPage}/${totalPages || 1} 页</span>`;
+                    html += `</div>`;
                 }
-                html += `<button onclick="goToReportPage(${kiwiReportPage + 1})" ${kiwiReportPage === totalPages ? 'disabled' : ''} style="padding:6px 12px;border:1px solid rgba(148,163,184,0.2);background:rgba(30,41,59,0.8);color:#cbd5e1;border-radius:6px;cursor:pointer;font-size:12px;${kiwiReportPage===totalPages?'opacity:0.5;cursor:not-allowed;':''}">下一页</button>`;
-                html += `<button onclick="goToReportPage(${totalPages})" ${kiwiReportPage === totalPages ? 'disabled' : ''} style="padding:6px 12px;border:1px solid rgba(148,163,184,0.2);background:rgba(30,41,59,0.8);color:#cbd5e1;border-radius:6px;cursor:pointer;font-size:12px;${kiwiReportPage===totalPages?'opacity:0.5;cursor:not-allowed;':''}">末页</button>`;
-                html += `<span style="color:#94a3b8;font-size:12px;margin-left:12px;">共 ${kiwiReportTotalCustomers} 个客户，第 ${kiwiReportPage}/${totalPages || 1} 页</span>`;
-                html += `</div>`;
             }
-            
+
             container.innerHTML = html;
         }
         
@@ -3561,8 +3557,8 @@
         let expenseMonthFilter = '';
         let expenseCategoryFilter = '';
         let selectedExpenseIds = new Set();
-        const EXPENSE_CATEGORIES = ['燃气费', '电费', '话费', '网费', '香烟', '菜肉米面油', '交通', '物业费', '水果', '其他'];
-        const EXPENSE_COLORS = {'燃气费':'#ef4444','电费':'#f97316','话费':'#3b82f6','网费':'#8b5cf6','香烟':'#6b7280','菜肉米面油':'#22c55e','交通':'#06b6d4','物业费':'#d97706','水果':'#ec4899','其他':'#a78bfa'};
+        const EXPENSE_CATEGORIES = ['燃气费', '电费', '话费', '网费', '暖气费', '香烟', '菜肉米面油', '交通', '物业费', '水果', '其他'];
+        const EXPENSE_COLORS = {'燃气费':'#ef4444','电费':'#f97316','话费':'#3b82f6','网费':'#8b5cf6','暖气费':'#f59e0b','香烟':'#6b7280','菜肉米面油':'#22c55e','交通':'#06b6d4','物业费':'#d97706','水果':'#ec4899','其他':'#a78bfa'};
 
         async function loadExpenses() {
             try {
@@ -3595,14 +3591,14 @@
                 return;
             }
             tbody.innerHTML = expenseData.map((r, i) => `
-                <div class="data-row" style="display:grid;grid-template-columns:40px 50px 100px 80px 100px 1fr 100px;align-items:center;padding:12px 16px;border-bottom:1px solid rgba(148,163,184,0.1);font-size:13px;">
+                <div class="data-row" style="display:grid;grid-template-columns:40px 1fr 1.2fr 1fr 1fr 2fr 1fr;align-items:center;padding:12px 16px;border-bottom:1px solid rgba(148,163,184,0.1);font-size:13px;box-sizing:border-box;">
                     <div style="display:flex;align-items:center;justify-content:center;"><input type="checkbox" class="expense-checkbox" data-id="${r.id}" onchange="toggleExpenseSelect(${r.id})" ${selectedExpenseIds.has(r.id)?'checked':''} style="cursor:pointer;"></div>
-                    <div style="color:#94a3b8;">${(expenseCurrentPage - 1) * expensePageSize + i + 1}</div>
-                    <div><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:${EXPENSE_COLORS[r.category] || '#64748b'}22;color:${EXPENSE_COLORS[r.category] || '#64748b'};">${escapeHtml(r.category)}</span></div>
-                    <div style="color:#2dd4bf;font-weight:600;">¥${parseFloat(r.amount).toFixed(2)}</div>
-                    <div style="color:#94a3b8;">${r.date}</div>
-                    <div style="color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${r.remark || ''}">${r.remark || '-'}</div>
-                    <div style="display:flex;gap:6px;justify-content:flex-end;">
+                    <div style="color:#94a3b8;text-align:center;">${(expenseCurrentPage - 1) * expensePageSize + i + 1}</div>
+                    <div style="text-align:center;"><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:${EXPENSE_COLORS[r.category] || '#64748b'}22;color:${EXPENSE_COLORS[r.category] || '#64748b'};">${escapeHtml(r.category)}</span></div>
+                    <div style="color:#2dd4bf;font-weight:600;text-align:center;">¥${parseFloat(r.amount).toFixed(2)}</div>
+                    <div style="color:#94a3b8;text-align:center;">${escapeHtml(r.date)}</div>
+                    <div style="color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;padding:0 8px;" title="${escapeHtml(r.remark || '')}">${escapeHtml(r.remark) || '-'}</div>
+                    <div style="display:flex;gap:6px;justify-content:center;">
                         <button onclick="editExpense(${r.id})" class="action-icon-btn edit" title="编辑"><i class="fa fa-pencil"></i></button>
                         <button onclick="deleteExpense(${r.id})" class="action-icon-btn delete" title="删除"><i class="fa fa-trash"></i></button>
                     </div>
@@ -3679,12 +3675,12 @@
                             </select>
                         </div>
                         <button class="btn btn-secondary" onclick="resetExpenseFilter()" style="padding:8px 16px;font-size:12px;font-weight:500;"><i class="fa fa-refresh"></i> 重置</button>
-                        <button class="btn btn-primary" onclick="exportExpenses()" style="padding:8px 16px;font-size:12px;font-weight:500;"><i class="fa fa-download"></i> 导出</button>
+                        <button class="btn btn-secondary" onclick="exportExpenses()" style="padding:8px 16px;font-size:12px;font-weight:500;"><i class="fa fa-download"></i> 导出</button>
                         <button class="btn btn-danger" id="deleteSelectedExpenseBtn" onclick="deleteSelectedExpenses()" style="padding:8px 16px;font-size:12px;font-weight:500;display:none;"><i class="fa fa-trash"></i> 删除选中 (<span id="selectedExpenseCount">0</span>)</button>
                     </div>
                     <div style="border:1px solid rgba(148,163,184,0.1);border-radius:10px;overflow:hidden;">
-                        <div style="display:grid;grid-template-columns:40px 50px 100px 80px 100px 1fr 100px;padding:12px 16px;background:rgba(30,41,59,0.6);border-bottom:1px solid rgba(148,163,184,0.15);font-size:12px;color:#94a3b8;font-weight:600;">
-                            <div style="display:flex;align-items:center;justify-content:center;"><input type="checkbox" id="selectAllExpense" onchange="toggleSelectAllExpense()" style="cursor:pointer;"></div><div>序号</div><div>分类</div><div>金额</div><div>日期</div><div>备注</div><div style="text-align:right;">操作</div>
+                        <div style="display:grid;grid-template-columns:40px 1fr 1.2fr 1fr 1fr 2fr 1fr;padding:12px 16px;background:rgba(30,41,59,0.6);border-bottom:1px solid rgba(148,163,184,0.15);font-size:12px;color:#94a3b8;font-weight:600;scrollbar-gutter:stable;box-sizing:border-box;">
+                            <div style="display:flex;align-items:center;justify-content:center;"><input type="checkbox" id="selectAllExpense" onchange="toggleSelectAllExpense()" style="cursor:pointer;"></div><div style="text-align:center;">序号</div><div style="text-align:center;">分类</div><div style="text-align:center;">金额</div><div style="text-align:center;">日期</div><div style="text-align:left;padding-left:8px;">备注</div><div style="text-align:center;">操作</div>
                         </div>
                         <div id="expenseTableBody"></div>
                     </div>
@@ -4294,16 +4290,16 @@
                 return;
             }
             tbody.innerHTML = overtimeData.map((r, i) => `
-                <div class="data-row" style="display:grid;grid-template-columns:40px 60px 90px 120px 100px 100px 80px 1fr 100px;align-items:center;padding:12px 16px;border-bottom:1px solid rgba(148,163,184,0.1);font-size:13px;">
+                <div class="data-row" style="display:grid;grid-template-columns:40px 1fr 1fr 1.2fr 1fr 1fr 1fr 2fr 1fr;align-items:center;padding:12px 16px;border-bottom:1px solid rgba(148,163,184,0.1);font-size:13px;box-sizing:border-box;">
                     <div style="display:flex;align-items:center;justify-content:center;"><input type="checkbox" class="overtime-checkbox" data-id="${r.id}" onchange="toggleOvertimeSelect(${r.id})" ${selectedOvertimeIds.has(r.id)?'checked':''} style="cursor:pointer;"></div>
-                    <div style="color:#94a3b8;">${(overtimeCurrentPage - 1) * overtimePageSize + i + 1}</div>
-                    <div>${r.date}</div>
-                    <div><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;${r.overtime_type === 'weekday' ? 'background:rgba(244,114,182,0.15);color:#f472b6;' : 'background:rgba(59,130,246,0.15);color:#3b82f6;'}">${r.overtime_type === 'weekday' ? '平时加班' : '周末加班'}</span></div>
-                    <div style="color:#cbd5e1;">${r.start_time}</div>
-                    <div style="color:#cbd5e1;">${r.end_time}</div>
-                    <div style="color:#60a5fa;font-weight:600;">${parseFloat(r.duration).toFixed(1)}h</div>
-                    <div style="color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${r.remark || ''}">${r.remark || '-'}</div>
-                    <div style="display:flex;gap:6px;justify-content:flex-end;">
+                    <div style="color:#94a3b8;text-align:center;">${(overtimeCurrentPage - 1) * overtimePageSize + i + 1}</div>
+                    <div style="text-align:center;">${escapeHtml(r.date)}</div>
+                    <div style="text-align:center;"><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;${r.overtime_type === 'weekday' ? 'background:rgba(244,114,182,0.15);color:#f472b6;' : 'background:rgba(59,130,246,0.15);color:#3b82f6;'}">${r.overtime_type === 'weekday' ? '平时加班' : '周末加班'}</span></div>
+                    <div style="color:#cbd5e1;text-align:center;">${escapeHtml(r.start_time)}</div>
+                    <div style="color:#cbd5e1;text-align:center;">${escapeHtml(r.end_time)}</div>
+                    <div style="color:#60a5fa;font-weight:600;text-align:center;">${parseFloat(r.duration).toFixed(1)}h</div>
+                    <div style="color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;padding:0 8px;" title="${escapeHtml(r.remark || '')}">${escapeHtml(r.remark) || '-'}</div>
+                    <div style="display:flex;gap:6px;justify-content:center;">
                         <button onclick="editOvertimeRecord(${r.id})" class="action-icon-btn edit" title="编辑"><i class="fa fa-pencil"></i></button>
                         <button onclick="deleteOvertimeRecord(${r.id})" class="action-icon-btn delete" title="删除"><i class="fa fa-trash"></i></button>
                     </div>
@@ -4471,8 +4467,8 @@
                         <button class="btn btn-danger" id="deleteSelectedOvertimeBtn" onclick="deleteSelectedOvertimeRecords()" style="padding:8px 16px;font-size:12px;font-weight:500;display:none;"><i class="fa fa-trash"></i> 删除选中 (<span id="selectedOvertimeCount">0</span>)</button>
                     </div>
                     <div style="border:1px solid rgba(148,163,184,0.1);border-radius:10px;overflow:hidden;">
-                        <div style="display:grid;grid-template-columns:40px 60px 90px 120px 100px 100px 80px 1fr 100px;padding:12px 16px;background:rgba(30,41,59,0.6);border-bottom:1px solid rgba(148,163,184,0.15);font-size:12px;color:#94a3b8;font-weight:600;">
-                            <div style="display:flex;align-items:center;justify-content:center;"><input type="checkbox" id="selectAllOvertime" onchange="toggleSelectAllOvertime()" style="cursor:pointer;"></div><div>序号</div><div>日期</div><div>类型</div><div>开始</div><div>结束</div><div>时长</div><div>工作内容</div><div style="text-align:right;">操作</div>
+                        <div style="display:grid;grid-template-columns:40px 1fr 1fr 1.2fr 1fr 1fr 1fr 2fr 1fr;padding:12px 16px;background:rgba(30,41,59,0.6);border-bottom:1px solid rgba(148,163,184,0.15);font-size:12px;color:#94a3b8;font-weight:600;scrollbar-gutter:stable;box-sizing:border-box;">
+                            <div style="display:flex;align-items:center;justify-content:center;"><input type="checkbox" id="selectAllOvertime" onchange="toggleSelectAllOvertime()" style="cursor:pointer;"></div><div style="text-align:center;">序号</div><div style="text-align:center;">日期</div><div style="text-align:center;">类型</div><div style="text-align:center;">开始</div><div style="text-align:center;">结束</div><div style="text-align:center;">时长</div><div style="text-align:left;padding-left:8px;">工作内容</div><div style="text-align:center;">操作</div>
                         </div>
                         <div id="overtimeTableBody"></div>
                     </div>
