@@ -1,0 +1,4152 @@
+
+        const API_URL = '/api';
+        console.log('API_URL initialized:', API_URL);
+
+        // DOM query cache: memoizes getElementById results
+        const _domCache = Object.create(null);
+        function _$(id) {
+            let el = _domCache[id];
+            if (!el || !el.isConnected) {
+                el = document.getElementById(id);
+                if (el) _domCache[id] = el;
+            }
+            return el;
+        }
+        function _clearDomCache() { for (const k in _domCache) delete _domCache[k]; }
+
+        async function fetchWithTimeout(url, options = {}, timeout = 15000) {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), timeout);
+            try {
+                const response = await fetch(url, { ...options, signal: controller.signal });
+                return response;
+            } catch (err) {
+                if (err.name === 'AbortError') {
+                    throw new Error('请求超时，请检查网络连接');
+                }
+                throw err;
+            } finally {
+                clearTimeout(timer);
+            }
+        }
+
+        /**
+         * 统一API请求封装：自动处理超时、重试、401跳转、错误解析
+         * @param {string} url
+         * @param {object} options - fetch options
+         * @param {number} maxRetries - 最大重试次数（默认2）
+         * @param {number} timeout - 超时毫秒（默认15000）
+         * @returns {Promise<object>} 解析后的JSON数据
+         */
+        async function apiRequest(url, options = {}, maxRetries = 2, timeout = 15000) {
+            let lastError;
+            for (let attempt = 0; attempt <= maxRetries; attempt++) {
+                try {
+                    const response = await fetchWithTimeout(url, options, timeout);
+
+                    if (response.status === 401) {
+                        localStorage.removeItem('token');
+                        localStorage.removeItem('user');
+                        window.location.hash = '#/login';
+                        throw new Error('登录已过期，请重新登录');
+                    }
+
+                    const text = await response.text();
+                    let data;
+                    try {
+                        data = JSON.parse(text);
+                    } catch (e) {
+                        data = { error: text || '服务器响应格式错误' };
+                    }
+
+                    if (!response.ok) {
+                        throw new Error(data.error || `请求失败(${response.status})`);
+                    }
+                    return data;
+                } catch (error) {
+                    lastError = error;
+                    // 不重试的情况：401、403、404、AbortError(超时)
+                    if (error.message.includes('登录已过期') ||
+                        error.message.includes('请求超时') ||
+                        error.message.includes('请求失败(403') ||
+                        error.message.includes('请求失败(404')) {
+                        break;
+                    }
+                    if (attempt < maxRetries) {
+                        await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
+                    }
+                }
+            }
+            throw lastError;
+        }
+
+        /** 安全化分页参数 */
+        function safePage(p) { return Math.max(1, parseInt(p) || 1); }
+        function safePageSize(ps) { const v = parseInt(ps); const CHOICES=[5,10,15]; if (CHOICES.includes(v)) return v; return CHOICES.reduce((a,b) => Math.abs(b-v) < Math.abs(a-v) ? b : a); }
+
+        /** 网络状态监听 */
+        window.addEventListener('offline', () => console.warn('[网络] 已断开'));
+        window.addEventListener('online', () => console.log('[网络] 已恢复'));
+
+        let currentCategory = null;
+        let currentTag = null;
+        let editingId = null;
+        let easyMDE = null;
+
+        // 缓存当前渲染的文章列表，供删除等操作按 id 查分类
+        let renderedArticlesCache = [];
+        // 分类为「工作日报」时，UI 文案中的「文章」显示为「日报」
+        function articleTerm(category) {
+            return category === '工作日报' ? '日报' : '文章';
+        }
+
+        let user = null; // 当前登录用户
+        let currentPage = 1;
+        let pageSize = 5;
+        // 初始化顶部的每页选择器（如果存在），同步当前 pageSize
+        try {
+            const pageSizeSelectTop = document.getElementById('articlePageSizeSelect');
+            if (pageSizeSelectTop) pageSizeSelectTop.value = pageSize;
+        } catch (e) { console.warn('article page-size select init skipped', e); }
+        let totalArticles = 0;
+        let currentView = 'all'; // all, favorites
+
+        // 检查用户登录状态
+        async function checkAuth() {
+            const token = localStorage.getItem('token');
+            const userData = localStorage.getItem('user');
+            if (token && userData) {
+                try {
+                    user = JSON.parse(userData);
+                    const displayName = user.name || user.username;
+                    let avatarHtml = '';
+                    if (user.avatar) {
+                        avatarHtml = `<div class="user-avatar" style="width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; overflow: hidden;"><img src="${escapeHtml(user.avatar)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none';this.parentElement.textContent='${escapeHtml(displayName.charAt(0).toUpperCase())}'"></div>`;
+                    } else {
+                        avatarHtml = `<div class="user-avatar">${escapeHtml(displayName.charAt(0).toUpperCase())}</div>`;
+                    }
+                    document.getElementById('userInfo').innerHTML = `
+                        ${avatarHtml}
+                        <span class="user-name">${escapeHtml(displayName)}</span>
+                        <button class="btn btn-secondary" onclick="openProfileModal()">编辑资料</button>
+                        <button class="btn btn-secondary" onclick="logout()">退出</button>
+                    `;
+                    await Promise.all([loadArticles(), loadCategories(), loadStats()]);
+                } catch (error) {
+                    console.error('解析用户数据失败:', error);
+                    localStorage.removeItem('token');
+                    localStorage.removeItem('user');
+                    user = null;
+                    document.getElementById('userInfo').innerHTML = `
+                        <button class="btn btn-secondary" onclick="openLoginModal()">登录</button>
+                    `;
+                    document.getElementById('articleList').innerHTML = `
+                        <div class="empty-state">
+                            <h3>请先登录</h3>
+                            <p>登录后可以查看和管理您的知识库</p>
+                            <button class="btn btn-secondary" onclick="openLoginModal()" style="margin-top: 16px;">立即登录</button>
+                        </div>
+                    `;
+                }
+            } else {
+                user = null;
+                document.getElementById('userInfo').innerHTML = `
+                    <button class="btn btn-secondary" onclick="openLoginModal()">登录</button>
+                `;
+                document.getElementById('articleList').innerHTML = `
+                    <div class="empty-state">
+                        <h3>请先登录</h3>
+                        <p>登录后可以查看和管理您的知识库</p>
+                        <button class="btn btn-secondary" onclick="openLoginModal()" style="margin-top: 16px;">立即登录</button>
+                    </div>
+                `;
+                // 清空分类和标签
+                document.getElementById('categoryList').innerHTML = '';
+                const tagCloud = document.getElementById('tagCloud');
+                if (tagCloud) tagCloud.innerHTML = '';
+                // 清空统计数据
+                document.getElementById('statArticles').textContent = '0';
+                document.getElementById('statFavorites').textContent = '0';
+                document.getElementById('statViews').textContent = '0';
+            }
+        }
+
+        // 打开登录模态框
+        function openLoginModal() {
+            document.body.style.overflow = 'hidden';
+            document.getElementById('loginModal').classList.add('active');
+        }
+
+        // 关闭登录模态框
+        function closeLoginModal() {
+            document.getElementById('loginModal').classList.remove('active');
+        }
+
+        // 切换登录/注册标签
+        function switchTab(tab) {
+            if (tab === 'login') {
+                document.getElementById('loginForm').style.display = 'block';
+                document.getElementById('registerForm').style.display = 'none';
+                document.getElementById('loginModalTitle').textContent = '登录';
+                document.querySelectorAll('.tab-btn')[0].classList.add('active');
+                document.querySelectorAll('.tab-btn')[1].classList.remove('active');
+            } else {
+                document.getElementById('loginForm').style.display = 'none';
+                document.getElementById('registerForm').style.display = 'block';
+                document.getElementById('loginModalTitle').textContent = '注册';
+                document.querySelectorAll('.tab-btn')[0].classList.remove('active');
+                document.querySelectorAll('.tab-btn')[1].classList.add('active');
+            }
+        }
+
+        // 登录函数
+        async function login(event) {
+            event.preventDefault();
+            const username = document.getElementById('loginUsername').value.trim();
+            const password = document.getElementById('loginPassword').value;
+
+            if (!username) { alert('请输入用户名'); return; }
+            if (!password) { alert('请输入密码'); return; }
+
+            try {
+                const response = await fetchWithTimeout(`${API_URL}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || '登录失败');
+                }
+
+                const data = await response.json();
+                localStorage.setItem('token', data.token);
+                localStorage.setItem('user', JSON.stringify(data));
+                user = data;
+                closeLoginModal();
+                checkAuth();
+                alert('登录成功！');
+            } catch (error) {
+                alert(error.message);
+            }
+        }
+
+        // 注册函数
+        async function register(event) {
+            event.preventDefault();
+            const username = document.getElementById('registerUsername').value.trim();
+            const password = document.getElementById('registerPassword').value;
+            const name = document.getElementById('registerName').value.trim();
+
+            if (!username) { alert('请输入用户名'); return; }
+            if (!password) { alert('请输入密码'); return; }
+            if (username.length < 3) { alert('用户名至少3个字符'); return; }
+            if (password.length < 6) { alert('密码至少6个字符'); return; }
+
+            try {
+                const response = await fetchWithTimeout(`${API_URL}/auth/register`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password, name })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || '注册失败');
+                }
+
+                const data = await response.json();
+                localStorage.setItem('token', data.token);
+                localStorage.setItem('user', JSON.stringify(data));
+                user = data;
+                closeLoginModal();
+                checkAuth();
+                alert('注册成功！');
+            } catch (error) {
+                alert(error.message);
+            }
+        }
+
+        // 退出登录
+        function logout() {
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            user = null;
+            checkAuth();
+            alert('已退出登录');
+        }
+
+        // 打开资料编辑模态框
+        function openProfileModal() {
+            // 填充当前用户信息
+            document.getElementById('profileUsername').value = user.username;
+            document.getElementById('profileName').value = user.name || '';
+            
+            // 显示头像预览
+            const avatarPreview = document.getElementById('avatarPreview');
+            if (user.avatar) {
+                avatarPreview.style.background = `url(${user.avatar}) no-repeat center center / cover`;
+                avatarPreview.textContent = '';
+            } else {
+                const displayName = user.name || user.username;
+                avatarPreview.style.background = '#60a5fa';
+                avatarPreview.textContent = displayName.charAt(0).toUpperCase();
+            }
+            
+            // 显示模态框
+            document.getElementById('profileModal').style.display = 'flex';
+        }
+
+        // 预览头像
+        function previewAvatar(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const avatarPreview = document.getElementById('avatarPreview');
+                    avatarPreview.style.background = `url(${e.target.result}) no-repeat center center / cover`;
+                    avatarPreview.textContent = '';
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        // 更新用户资料
+        async function updateProfile(event) {
+            event.preventDefault();
+            const name = document.getElementById('profileName').value.trim();
+            const avatarFile = document.getElementById('avatarFile').files[0];
+            
+            let avatar = user.avatar || '';
+            
+            // 如果有新头像，先上传
+            if (avatarFile) {
+                try {
+                    // 这里可以添加头像上传逻辑，暂时使用base64
+                    const reader = new FileReader();
+                    await new Promise((resolve, reject) => {
+                        reader.onload = function(e) {
+                            // 限制base64大小，避免请求体过大
+                            const base64 = e.target.result;
+                            if (base64.length > 1024 * 1024) { // 1MB
+                                reject(new Error('头像文件太大，请选择小于1MB的图片'));
+                                return;
+                            }
+                            avatar = base64;
+                            resolve();
+                        };
+                        reader.onerror = function() {
+                            reject(new Error('读取头像文件失败'));
+                        };
+                        reader.readAsDataURL(avatarFile);
+                    });
+                } catch (error) {
+                    console.error('头像处理失败:', error);
+                    alert(error.message);
+                    return;
+                }
+            }
+            
+            try {
+                console.log('Updating profile with:', { name, avatar: avatar ? 'base64 data' : 'empty' });
+                const response = await fetchWithTimeout(`${API_URL}/auth/me`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    body: JSON.stringify({ name, avatar })
+                });
+                
+                console.log('Response status:', response.status);
+                console.log('Response ok:', response.ok);
+                
+                if (!response.ok) {
+                    const text = await response.text();
+                    console.error('Response text:', text);
+                    throw new Error('更新资料失败: ' + text);
+                }
+                
+                const updatedUser = await response.json();
+                console.log('Updated user:', updatedUser);
+                localStorage.setItem('user', JSON.stringify(updatedUser));
+                user = updatedUser;
+                
+                // 先关闭模态框
+                document.getElementById('profileModal').style.display = 'none';
+                
+                // 然后更新用户信息显示
+                checkAuth();
+                
+                // 最后显示成功提示
+                alert('资料更新成功！');
+            } catch (error) {
+                console.error('更新资料失败:', error);
+                alert(error.message);
+            }
+        }
+
+
+
+
+
+        // 获取认证头
+        function getAuthHeaders() {
+            const token = localStorage.getItem('token');
+            return token ? { 'Authorization': `Bearer ${token}` } : {};
+        }
+
+        // 清除登录状态（测试用）
+        function clearAuth() {
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            user = null;
+            checkAuth();
+            alert('登录状态已清除');
+        }
+
+        // 加载猕猴桃销售订单数量
+        async function loadKiwiSalesCount() {
+            try {
+                const response = await fetchWithTimeout(`${API_URL}/kiwi-sales?page=1&page_size=1`, {
+                    headers: getAuthHeaders()
+                });
+                
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        // 未授权，重新检查认证状态
+                        checkAuth();
+                    }
+                    return;
+                }
+                
+                const data = await response.json();
+                if (data && data.total !== undefined) {
+                    document.getElementById('kiwiSalesCount').textContent = data.total;
+                }
+            } catch (error) {
+                console.error('加载猕猴桃销售订单数量失败:', error);
+                const el = document.getElementById('kiwiSalesCount');
+                if (el) el.textContent = '加载失败';
+            }
+        }
+
+        // 加载加班记录数量
+        async function loadOvertimeCount() {
+            try {
+                const response = await fetchWithTimeout(`${API_URL}/overtime?page=1&page_size=1`, {
+                    headers: getAuthHeaders()
+                });
+                if (!response.ok) return;
+                const data = await response.json();
+                if (data && data.total !== undefined) {
+                    document.getElementById('overtimeCount').textContent = data.total;
+                }
+            } catch (error) {
+                console.error('加载加班记录数量失败:', error);
+                const el = document.getElementById('overtimeCount');
+                if (el) el.textContent = '加载失败';
+            }
+        }
+
+        // 导出猕猴桃销售订单到Excel - 调用后端GBK编码API
+        async function exportKiwiSalesToExcel() {
+            try {
+                // 显示加载状态
+                const originalText = document.querySelector('button[onclick="exportKiwiSalesToExcel()"]').textContent;
+                document.querySelector('button[onclick="exportKiwiSalesToExcel()"]').textContent = '导出中...';
+                
+                // 构建导出URL
+                let exportUrl = `${API_URL}/kiwi-sales/export`;
+                const queryParams = [];
+                if (kiwiSalesCustomerSearch) {
+                    queryParams.push(`customer=${encodeURIComponent(kiwiSalesCustomerSearch)}`);
+                }
+                if (kiwiSalesPhoneSearch) {
+                    queryParams.push(`phone=${encodeURIComponent(kiwiSalesPhoneSearch)}`);
+                }
+                if (kiwiSalesYearSearch) {
+                    queryParams.push(`year=${kiwiSalesYearSearch}`);
+                }
+                if (queryParams.length > 0) {
+                    exportUrl += '?' + queryParams.join('&');
+                }
+                
+                const response = await fetchWithTimeout(exportUrl, {
+                    headers: getAuthHeaders()
+                });
+                
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        checkAuth();
+                    }
+                    throw new Error('导出失败');
+                }
+                
+                // 处理文件下载
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.setAttribute('href', url);
+                const now = new Date();
+                const filename = `猕猴桃销售订单_${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}.csv`;
+                link.setAttribute('download', filename);
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                // 恢复按钮文本
+                document.querySelector('button[onclick="exportKiwiSalesToExcel()"]').textContent = originalText;
+                
+                // 清除选中状态
+                const selectAll = document.getElementById('selectAllKiwiSales');
+                if (selectAll) selectAll.checked = false;
+                const checkboxes = document.querySelectorAll('.kiwi-sales-checkbox');
+                checkboxes.forEach(cb => cb.checked = false);
+                updateKiwiSalesDeleteButton();
+                
+                alert('导出成功！');
+            } catch (error) {
+                console.error('导出失败:', error);
+                document.querySelector('button[onclick="exportKiwiSalesToExcel()"]').textContent = '导出Excel';
+                alert('导出失败，请重试');
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            checkAuth();
+            
+            // 加载猕猴桃销售订单数量
+            loadKiwiSalesCount();
+            
+            // 加载加班记录数量
+            loadOvertimeCount();
+            
+            // 加载记账记录数量
+            loadExpenseCount();
+            
+            // 点击页面其他地方关闭右键菜单
+            function closeArticleContextMenu(e) {
+                const menu = document.getElementById('articleContextMenu');
+                if (menu) menu.style.display = 'none';
+            }
+            document.addEventListener('click', closeArticleContextMenu);
+            
+            // 为右键菜单添加悬停效果
+            const menuItems = document.querySelectorAll('.context-menu-item');
+            menuItems.forEach(item => {
+                item.addEventListener('mouseenter', function() {
+                    this.style.background = 'rgba(96, 165, 250, 0.1)';
+                });
+                item.addEventListener('mouseleave', function() {
+                    this.style.background = 'transparent';
+                });
+            });
+        });
+
+        async function loadArticles() {
+            console.log('=== 加载文章开始 ===');
+            console.log('当前分类:', currentCategory);
+            console.log('当前标签:', currentTag);
+            console.log('当前视图:', currentView);
+            console.log('当前页码:', currentPage);
+            console.log('每页大小:', pageSize);
+            
+            let url = `${API_URL}/articles`;
+            const params = [];
+            if (currentCategory) params.push(`category=${encodeURIComponent(currentCategory)}`);
+            if (currentTag) params.push(`tag=${encodeURIComponent(currentTag)}`);
+            if (currentView === 'favorites') params.push('favorite=true');
+            params.push(`page=${currentPage}`);
+            params.push(`page_size=${pageSize}`);
+            if (params.length) url += '?' + params.join('&');
+            
+            console.log('请求URL:', url);
+            try {
+                const response = await fetchWithTimeout(url, {
+                    headers: getAuthHeaders()
+                });
+                
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        // 未授权，重新检查认证状态
+                        localStorage.removeItem('token');
+                        localStorage.removeItem('user');
+                        user = null;
+                        checkAuth();
+                    }
+                    throw new Error('加载文章失败');
+                }
+                
+                const result = await response.json();
+                console.log('API响应:', result);
+                if (!result || !Array.isArray(result.articles)) {
+                    throw new Error('接口响应格式错误');
+                }
+                const articles = result.articles;
+                totalArticles = result.total || 0;
+                renderArticles(articles);
+            } catch (error) {
+                console.error('加载文章失败:', error);
+                console.error('错误详情:', error.message);
+                // 避免无限循环，不在这里调用checkAuth()
+                // 显示错误信息
+                const articleList = _$('articleList');
+                articleList.innerHTML = `
+                    <div class="empty-state">
+                        <h3>加载失败</h3>
+                        <p>${error.message}</p>
+                        <button class="btn btn-secondary" onclick="loadArticles()" style="margin-top: 16px;">重试</button>
+                    </div>
+                `;
+            }
+        }
+
+        function renderArticles(articles) {
+            const articleList = _$('articleList');
+            renderedArticlesCache = articles || [];
+            if (articles.length === 0) {
+                if (currentPage > 1) {
+                    currentPage--;
+                    loadArticles();
+                    return;
+                }
+                if (currentView === 'search') {
+                    articleList.innerHTML = `<div class="empty-state-card"><i class="fa fa-search"></i><p>未找到匹配的${articleTerm(currentCategory)}</p></div>`;
+                } else {
+                    articleList.innerHTML = `<div class="empty-state-card"><i class="fa fa-inbox"></i><p>暂无${articleTerm(currentCategory)}，点击「新增」开始创建</p></div>`;
+                }
+                _clearDomCache();
+                updateSelectedCount();
+                return;
+            }
+            
+            // 计算序号起始值
+            const startIndex = (currentPage - 1) * pageSize + 1;
+            
+            articleList.innerHTML = `
+                <div class="main-article-header" style="display: flex; align-items: center; padding: 10px 12px; background: rgba(15, 23, 42, 0.8); border-bottom: 1px solid rgba(148, 163, 184, 0.15); border-radius: 8px 8px 0 0; width: 100%;">
+                    <div class="main-header-checkbox" style="flex: 0.5; text-align: center; font-weight: 600; color: #cbd5e1; font-size: 13px;">
+                        <input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll(this)" style="margin: 0;">
+                    </div>
+                    <div class="main-header-index" style="flex: 1; text-align: center; font-weight: 600; color: #cbd5e1; font-size: 13px;">序号</div>
+                    <div class="main-header-title" style="flex: 1.5; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: left; padding: 0 5px;">标题</div>
+                    <div class="main-header-category" style="flex: 1; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">分类</div>
+                    <div class="main-header-date" style="flex: 1; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">发布时间</div>
+                    <div class="main-header-views" style="flex: 1; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">阅读次数</div>
+                    <div class="main-header-actions" style="flex: 1; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">操作</div>
+                </div>
+            ` + articles.map((article, index) => {
+                const articleIndex = startIndex + index;
+                return `
+                <div class="main-article-item" data-id="${article.id}" style="display: flex; align-items: center; padding: 10px 12px; border-bottom: 1px solid rgba(148, 163, 184, 0.05); transition: background 0.2s ease; width: 100%;">
+                    <div class="main-article-checkbox" style="flex: 0.5; text-align: center; color: #94a3b8; font-size: 12px;">
+                        <input type="checkbox" class="article-checkbox" value="${article.id}" onchange="updateSelectedCount()" style="margin: 0;">
+                    </div>
+                    <div class="main-article-index" style="flex: 1; text-align: center; color: #94a3b8; font-size: 12px;">${articleIndex}</div>
+                    <div class="main-article-title" onclick="viewArticle(${article.id})" style="flex: 1.5; cursor: pointer; color: #e2e8f0; font-size: 14px; font-weight: 500; padding: 0 5px; text-align: left;">${escapeHtml(article.title)}</div>
+                    <div class="main-article-category" style="flex: 1; color: #94a3b8; font-size: 12px; text-align: center;">${article.category || '未分类'}</div>
+                    <div class="main-article-date" style="flex: 1; color: #94a3b8; font-size: 12px; text-align: center;">${formatDate(article.updated_at)}</div>
+                    <div class="main-article-views-count" style="flex: 1; color: #94a3b8; font-size: 12px; text-align: center;">
+                        <i class="fa fa-eye" style="font-size: 11px; margin-right: 2px;"></i> ${article.views || 0}
+                    </div>
+                    <div class="main-article-actions" style="flex: 1; display: flex; gap: 6px; justify-content: center;">
+                        <button class="action-btn edit-btn" onclick="editArticle(${article.id})" title="编辑${articleTerm(article.category)}" style="
+                            padding: 6px 10px;
+                            border: 1px solid rgba(148, 163, 184, 0.3);
+                            background: rgba(30, 41, 59, 0.8);
+                            color: #cbd5e1;
+                            border-radius: 6px;
+                            cursor: pointer;
+                            font-size: 13px;
+                            transition: all 0.2s ease;
+                        "
+                        onmouseover="this.style.background='rgba(96,165,250,0.15)';this.style.borderColor='rgba(96,165,250,0.5)';this.style.color='#60a5fa';"
+                        onmouseout="this.style.background='rgba(30,41,59,0.8)';this.style.borderColor='rgba(148,163,184,0.3)';this.style.color='#cbd5e1';">
+                            <i class="fa fa-pencil" style="font-size: 14px;"></i>
+                        </button>
+                        <button class="action-btn delete-btn" onclick="deleteArticle(${article.id})" title="删除${articleTerm(article.category)}" style="
+                            padding: 6px 10px;
+                            border: 1px solid rgba(148, 163, 184, 0.3);
+                            background: rgba(30, 41, 59, 0.8);
+                            color: #cbd5e1;
+                            border-radius: 6px;
+                            cursor: pointer;
+                            font-size: 13px;
+                            transition: all 0.2s ease;
+                        "
+                        onmouseover="this.style.background='rgba(239,68,68,0.15)';this.style.borderColor='rgba(239,68,68,0.5)';this.style.color='#f87171';"
+                        onmouseout="this.style.background='rgba(30,41,59,0.8)';this.style.borderColor='rgba(148,163,184,0.3)';this.style.color='#cbd5e1';">
+                            <i class="fa fa-trash" style="font-size: 14px;"></i>
+                        </button>
+                    </div>
+                </div>
+            `;
+            }).join('') + `
+                <div class="pagination" style="
+                    margin-top: 20px;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    gap: 8px;
+                    padding: 12px;
+                    background: rgba(30, 41, 59, 0.5);
+                    border-radius: 8px;
+                    border: 1px solid rgba(148, 163, 184, 0.1);
+                ">
+                    ${renderPagination()}
+                </div>
+            `;
+            updateSelectedCount();
+        }
+        
+        function renderPagination() {
+            const totalPages = Math.ceil(totalArticles / pageSize);
+
+            let paginationHTML = '';
+            // 每页选择（参考加班记录样式）——始终显示
+            paginationHTML += `<div style="display:flex;align-items:center;gap:8px;margin-right:12px;"><span style="color:#94a3b8;font-size:12px;">每页</span><select onchange="changeArticlePageSize(this.value)" style="padding:4px 8px;border:1px solid rgba(148,163,184,0.2);border-radius:4px;background:rgba(30,41,59,0.8);color:#cbd5e1;font-size:12px;">`;
+            [5,10,15].forEach(s => { paginationHTML += `<option value=\"${s}\" ${pageSize===s?'selected':''}>${s}</option>`; });
+            paginationHTML += `</select><span style="color:#94a3b8;font-size:12px;">条</span></div>`;
+
+            // 如果页数多于1，显示分页按钮；否则仅显示统计信息和每页选择器
+            if (totalPages > 1) {
+                const showPages = 5;
+                let startPage = Math.max(1, currentPage - Math.floor(showPages / 2));
+                let endPage = Math.min(totalPages, startPage + showPages - 1);
+                if (endPage - startPage < showPages - 1) startPage = Math.max(1, endPage - showPages + 1);
+                paginationHTML += `<button onclick="changePage(1)" class="page-btn" ${currentPage===1?'disabled':''}>首页</button>`;
+                paginationHTML += `<button onclick="changePage(${currentPage - 1})" class="page-btn" ${currentPage===1?'disabled':''}>上一页</button>`;
+                for (let i = startPage; i <= endPage; i++) {
+                    paginationHTML += `<button onclick="changePage(${i})" class="page-btn ${currentPage===i?'active':''}">${i}</button>`;
+                }
+                paginationHTML += `<button onclick="changePage(${currentPage + 1})" class="page-btn" ${currentPage===totalPages?'disabled':''}>下一页</button>`;
+                paginationHTML += `<button onclick="changePage(${totalPages})" class="page-btn" ${currentPage===totalPages?'disabled':''}>末页</button>`;
+            }
+
+            paginationHTML += `<span style="color:#94a3b8;font-size:12px;margin-left:12px;">共 ${totalArticles} 篇，第 ${currentPage}/${totalPages || 1} 页</span>`;
+            return paginationHTML;
+        }
+
+        function changeArticlePageSize(size) {
+            pageSize = parseInt(size, 10);
+            currentPage = 1;
+            loadArticles();
+        }
+        
+        function changePage(page) {
+            if (page < 1 || page > Math.ceil(totalArticles / pageSize)) return;
+            currentPage = page;
+            loadArticles();
+        }
+
+        function getCategoryColor(category) {
+            const colors = {'技术':'#60a5fa','生活':'#a78bfa','学习':'#34d399','工作':'#f472b6','未分类':'#64748b'};
+            return colors[category] || '#60a5fa';
+        }
+        function formatDate(dateStr) { 
+            const date = new Date(dateStr);
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const seconds = String(date.getSeconds()).padStart(2, '0');
+            return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+        }
+        function escapeHtml(text) { if (text == null) return ''; return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+        // Ensure marked never returns HTML for code blocks; force escaping and language prefix.
+        marked.setOptions({
+            highlight: function(code, lang) { return escapeHtml(code); },
+            langPrefix: 'language-'
+        });
+        // 文章导航函数
+        async function navigateArticle(currentId, direction) {
+            console.log('=== navigateArticle called ===');
+            console.log('Current ID:', currentId);
+            console.log('Direction:', direction);
+            console.log('API_URL:', API_URL);
+            
+            try {
+                const headers = getAuthHeaders();
+                console.log('Headers:', headers);
+                
+                // 手动构建完整URL，确保包含API前缀
+                const fullUrl = `${API_URL}/articles/navigate?current_id=${currentId}&direction=${direction}`;
+                console.log('Full URL:', fullUrl);
+                
+                const response = await fetchWithTimeout(fullUrl, {
+                    headers: headers
+                });
+                
+                console.log('Response status:', response.status);
+                console.log('Response ok:', response.ok);
+                
+                const result = await response.json();
+                console.log('Response result:', result);
+                
+                if (result.article) {
+                    console.log('Found article:', result.article);
+                    viewArticle(result.article.id);
+                } else {
+                    console.log('No article found');
+                    alert(direction === 'prev' ? `已经是第一篇${articleTerm(currentCategory)}了` : `已经是最后一篇${articleTerm(currentCategory)}了`);
+                }
+            } catch (error) {
+                console.error('导航失败:', error);
+                alert('导航失败');
+            }
+        }
+
+        // 仅在「工作日报」分类下显示顶部统计栏；showAll 传 true 强制隐藏（用于切到非文章模块）
+        function updateStatsBarVisibility(forceHide) {
+            const bar = document.getElementById('articlesStatsBar');
+            if (bar) {
+                bar.style.display = (forceHide || currentCategory !== '工作日报') ? 'none' : 'flex';
+            }
+        }
+
+        function filterByCategory(category) {
+            console.log('=== 切换分类 ===');
+            console.log('新分类:', category);
+            currentCategory = category;
+            currentTag = null;
+            currentPage = 1;
+            currentView = 'all';
+            // 显示文章工具栏
+            const toolbar = document.querySelector('.toolbar');
+            if (toolbar) {
+                toolbar.style.display = 'flex';
+            }
+            updateStatsBarVisibility();
+            loadArticles();
+        }
+        function filterByTag(tag) {
+            currentTag = tag;
+            currentCategory = null;
+            currentPage = 1;
+            currentView = 'all';
+            // 显示文章工具栏
+            const toolbar = document.querySelector('.toolbar');
+            if (toolbar) {
+                toolbar.style.display = 'flex';
+            }
+            updateStatsBarVisibility();
+            loadArticles();
+        }
+        function showAll() {
+            currentCategory = null;
+            currentTag = null;
+            currentPage = 1;
+            currentView = 'all';
+            // 显示文章工具栏
+            const toolbar = document.querySelector('.toolbar');
+            if (toolbar) {
+                toolbar.style.display = 'flex';
+            }
+            updateStatsBarVisibility();
+            loadArticles();
+        }
+        function showFavorites() {
+            currentCategory = null;
+            currentTag = null;
+            currentPage = 1;
+            currentView = 'favorites';
+            // 显示文章工具栏
+            const toolbar = document.querySelector('.toolbar');
+            if (toolbar) {
+                toolbar.style.display = 'flex';
+            }
+            updateStatsBarVisibility();
+            loadArticles();
+        }
+
+        async function toggleFavorite(id, event) {
+            event.stopPropagation();
+            try {
+                const response = await fetchWithTimeout(`${API_URL}/articles/${id}/favorite`, {
+                    method: 'POST',
+                    headers: getAuthHeaders()
+                });
+                
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        // 未授权，重新检查认证状态
+                        localStorage.removeItem('token');
+                        localStorage.removeItem('user');
+                        user = null;
+                        checkAuth();
+                    }
+                    throw new Error('切换收藏失败');
+                }
+                
+                const result = await response.json();
+                loadArticles();
+                loadStats();
+                
+                // 更新当前页面的收藏按钮状态
+                const favoriteButtons = document.querySelectorAll(`button[onclick*="toggleFavorite(${id})"]`);
+                favoriteButtons.forEach(button => {
+                    if (result.is_favorite) {
+                        button.innerHTML = '<i class="fa fa-star"></i> 取消收藏';
+                    } else {
+                        button.innerHTML = '<i class="fa fa-star-o"></i> 收藏';
+                    }
+                });
+            } catch (error) {
+                console.error('切换收藏失败:', error);
+                alert('切换收藏失败，请重试');
+            }
+        }
+        function handleSearch(event) {
+            if (event && event.key !== 'Enter') return;
+            if (event) event.preventDefault();
+            clearTimeout(window._searchDebounceTimer);
+            const searchTerm = document.getElementById('searchInput').value.trim();
+            currentCategory = null;
+            currentTag = null;
+            window._searchDebounceTimer = setTimeout(function() {
+                if (searchTerm) {
+                    searchArticles(searchTerm);
+                } else {
+                    loadArticles();
+                }
+            }, 300);
+        }
+
+        async function searchArticles(searchTerm) {
+            try {
+                console.log('=== 搜索文章 ===');
+                console.log('搜索关键词:', searchTerm);
+                
+                const response = await fetchWithTimeout(`${API_URL}/articles?search=${encodeURIComponent(searchTerm)}&page=${currentPage}&page_size=${pageSize}`, {
+                    headers: getAuthHeaders()
+                });
+                
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        // 未授权，重新检查认证状态
+                        checkAuth();
+                    }
+                    throw new Error('搜索失败');
+                }
+                
+                const result = await response.json();
+                console.log('搜索响应:', result);
+                
+                if (!result || !Array.isArray(result.articles)) {
+                    throw new Error('搜索响应格式错误');
+                }
+                
+                const articles = result.articles;
+                totalArticles = result.total || 0;
+                currentView = 'search';
+                renderArticles(articles);
+                renderPagination();
+            } catch (error) { 
+                console.error('搜索失败:', error);
+                const articleList = _$('articleList');
+                articleList.innerHTML = `
+                    <div class="empty-state">
+                        <h3>搜索失败</h3>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        // 猕猴桃销售模块
+        let kiwiSalesData = [];
+        let kiwiSalesTotal = 0;
+        let kiwiSalesCurrentPage = 1;
+        let kiwiSalesPageSize = 5;
+        let kiwiSalesSelectedIds = [];
+        
+        let kiwiSalesCustomerSearch = '';
+        let kiwiSalesPhoneSearch = '';
+        let kiwiSalesYearSearch = '';
+        
+        async function loadKiwiSales() {
+            try {
+                let url = `${API_URL}/kiwi-sales?page=${kiwiSalesCurrentPage}&page_size=${kiwiSalesPageSize}`;
+                if (kiwiSalesCustomerSearch) {
+                    url += `&customer=${encodeURIComponent(kiwiSalesCustomerSearch)}`;
+                }
+                if (kiwiSalesPhoneSearch) {
+                    url += `&phone=${encodeURIComponent(kiwiSalesPhoneSearch)}`;
+                }
+                if (kiwiSalesYearSearch) {
+                    url += `&year=${kiwiSalesYearSearch}`;
+                }
+                const response = await fetchWithTimeout(url, {
+                    headers: getAuthHeaders()
+                });
+                if (!response.ok) throw new Error('加载销售数据失败');
+                const result = await response.json();
+                kiwiSalesData = result.sales;
+                kiwiSalesTotal = result.total;
+                document.getElementById('kiwiSalesCount').textContent = kiwiSalesTotal;
+                renderKiwiSales();
+                renderKiwiSalesPagination();
+            } catch (error) {
+                console.error('加载销售数据失败:', error);
+                const el = document.getElementById('kiwiSalesTableBody');
+                if (el) el.innerHTML = '<div class="empty-state-card"><i class="fa fa-exclamation-triangle"></i><p>加载失败，请刷新重试</p></div>';
+            }
+        }
+        
+        function handleKiwiSearch() {
+            kiwiSalesCustomerSearch = document.getElementById('kiwiCustomerSearch').value.trim();
+            kiwiSalesPhoneSearch = document.getElementById('kiwiPhoneSearch').value.trim();
+            const yearSelect = document.getElementById('kiwiSalesYearFilter');
+            kiwiSalesYearSearch = yearSelect ? yearSelect.value : '';
+            kiwiSalesCurrentPage = 1;
+            loadKiwiSales();
+        }
+        
+        function resetKiwiSearch() {
+            // 清空搜索输入框
+            document.getElementById('kiwiCustomerSearch').value = '';
+            document.getElementById('kiwiPhoneSearch').value = '';
+            const yearSelect = document.getElementById('kiwiSalesYearFilter');
+            if (yearSelect) yearSelect.value = '';
+            // 重置搜索条件
+            kiwiSalesCustomerSearch = '';
+            kiwiSalesPhoneSearch = '';
+            kiwiSalesYearSearch = '';
+            // 重新加载所有订单
+            kiwiSalesCurrentPage = 1;
+            loadKiwiSales();
+        }
+        
+        function showKiwiSales() {
+            window.scrollTo(0, 0);
+            kiwiSalesCurrentPage = 1;
+            kiwiSalesCustomerSearch = '';
+            kiwiSalesPhoneSearch = '';
+            kiwiSalesYearSearch = '';
+            // 隐藏文章工具栏
+            const toolbar = document.querySelector('.toolbar');
+            if (toolbar) {
+                toolbar.style.display = 'none';
+            }
+            updateStatsBarVisibility(true);
+            document.getElementById('articleList').innerHTML = `
+                <div id="kiwiSalesSection" style="padding: 20px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <h2 style="color: #94a3b8; margin: 0; font-size: 18px; text-align: center; flex: 1; font-weight: 500;"><i class="fa fa-lemon-o" style="color: #7CFC00; margin-right: 8px;"></i> 猕猴桃销售订单</h2>
+                        <div style="margin-left: 20px; display: flex; gap: 8px;">
+                            <button class="btn btn-secondary" onclick="openKiwiSalesModal()" style="
+                                padding: 12px 24px;
+                                border: 1px solid rgba(148, 163, 184, 0.1);
+                                background: rgba(255,255,255,0.05);
+                                color: #cbd5e1;
+                                border-radius: 12px;
+                                cursor: pointer;
+                                font-size: 14px;
+                                font-weight: 600;
+                                transition: all 0.3s ease;
+                            ">+ 新增订单</button>
+                            <button class="btn btn-secondary" onclick="exportKiwiSalesToExcel()" style="
+                                padding: 12px 24px;
+                                border: 1px solid rgba(148, 163, 184, 0.1);
+                                background: rgba(255,255,255,0.05);
+                                color: #cbd5e1;
+                                border-radius: 12px;
+                                cursor: pointer;
+                                font-size: 14px;
+                                font-weight: 600;
+                                transition: all 0.3s ease;
+                            ">导出Excel</button>
+                            <button class="btn btn-danger" onclick="deleteSelectedKiwiSales()" style="
+                                display: none;
+                                padding: 12px 24px;
+                                border: 1px solid rgba(239, 68, 68, 0.3);
+                                background: rgba(239, 68, 68, 0.1);
+                                color: #f87171;
+                                border-radius: 12px;
+                                cursor: pointer;
+                                font-size: 14px;
+                                font-weight: 600;
+                                transition: all 0.3s ease;
+                            " id="deleteKiwiSalesBtn">删除选中</button>
+                        </div>
+                    </div>
+                    <div style="display: flex; align-items: center; margin-bottom: 15px; gap: 10px; flex-wrap: wrap;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <label style="font-size: 12px; color: #94a3b8;">年份：</label>
+                            <select id="kiwiSalesYearFilter" onchange="handleKiwiSearch()" style="padding: 8px 12px; border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 6px; background: rgba(30, 41, 59, 0.8); color: #cbd5e1; font-size: 12px;">
+                                <option value="">全部年份</option>
+                            </select>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <label style="font-size: 12px; color: #94a3b8;">客户名：</label>
+                            <input type="text" id="kiwiCustomerSearch" style="
+                                width: 180px;
+                                padding: 8px 12px;
+                                border: 1px solid rgba(148, 163, 184, 0.2);
+                                border-radius: 6px;
+                                background: rgba(30, 41, 59, 0.8);
+                                color: #cbd5e1;
+                                font-size: 12px;
+                            ">
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <label style="font-size: 12px; color: #94a3b8;">客户电话：</label>
+                            <input type="text" id="kiwiPhoneSearch" style="
+                                width: 180px;
+                                padding: 8px 12px;
+                                border: 1px solid rgba(148, 163, 184, 0.2);
+                                border-radius: 6px;
+                                background: rgba(30, 41, 59, 0.8);
+                                color: #cbd5e1;
+                                font-size: 12px;
+                            ">
+                        </div>
+                        <button class="btn btn-secondary" onclick="handleKiwiSearch()" style="padding: 8px 16px; font-size: 12px; font-weight: 500; margin-left: 10px;">
+                            <i class="fa fa-search"></i> 搜索
+                        </button>
+                        <button class="btn btn-secondary" onclick="resetKiwiSearch()" style="padding: 8px 16px; font-size: 12px; font-weight: 500; margin-left: 10px;">
+                            <i class="fa fa-refresh"></i> 重置
+                        </button>
+                    </div>
+                    <div class="main-article-header" style="display: flex; align-items: center; padding: 10px 12px; background: rgba(15, 23, 42, 0.8); border-bottom: 1px solid rgba(148, 163, 184, 0.15); border-radius: 8px 8px 0 0; width: 100%;">
+                        <div style="flex: 0.5; text-align: center; font-weight: 600; color: #cbd5e1; font-size: 13px;">
+                            <input type="checkbox" id="selectAllKiwiSales" onchange="toggleSelectAllKiwiSales(this)" style="
+                                width: 14px;
+                                height: 14px;
+                                accent-color: #22c55e;
+                                cursor: pointer;
+                            ">
+                        </div>
+                        <div class="main-header-index" style="flex: 0.8; text-align: center; font-weight: 600; color: #cbd5e1; font-size: 13px;">序号</div>
+                        <div class="main-header-customer" style="flex: 1.2; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: left; padding: 0 5px;">客户名</div>
+                        <div class="main-header-phone" style="flex: 1.2; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: left; padding: 0 5px;">电话</div>
+                        <div class="main-header-address" style="flex: 2; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: left; padding: 0 5px;">地址</div>
+                        <div class="main-header-order-date" style="flex: 1; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">接单日期</div>
+                        <div class="main-header-status" style="flex: 1; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">状态</div>
+                        <div class="main-header-tracking" style="flex: 1.5; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: left; padding: 0 5px; white-space: nowrap;">运单号</div>
+                        <div class="main-header-remark" style="flex: 0.8; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">备注</div>
+                        <div class="main-header-quantity" style="flex: 0.6; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">数量</div>
+                        <div class="main-header-payment" style="flex: 0.8; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">支付金额</div>
+                        <div class="main-header-actions" style="flex: 0.8; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">操作</div>
+                    </div>
+                    <div id="kiwiSalesTableBody"></div>
+                    <div class="pagination" id="kiwiSalesPagination" style="
+                        margin-top: 20px;
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        gap: 8px;
+                        padding: 12px;
+                        background: rgba(30, 41, 59, 0.5);
+                        border-radius: 8px;
+                        border: 1px solid rgba(148, 163, 184, 0.1);
+                    "></div>
+                </div>
+            `;
+            // 填充年份选项
+            const currentYear = new Date().getFullYear();
+            const yearSelect = document.getElementById('kiwiSalesYearFilter');
+            if (yearSelect) {
+                for (let y = currentYear + 1; y >= 2024; y--) {
+                    const opt = document.createElement('option');
+                    opt.value = y;
+                    opt.textContent = y + '年';
+                    yearSelect.appendChild(opt);
+                }
+            }
+            loadKiwiSales();
+        }
+        
+        function renderKiwiSales() {
+            const tbody = document.getElementById('kiwiSalesTableBody');
+            if (!tbody) return;
+            if (kiwiSalesData.length === 0) {
+                tbody.innerHTML = '<div class="empty-state-card"><i class="fa fa-inbox"></i><p>暂无订单数据</p></div>';
+                return;
+            }
+            tbody.innerHTML = kiwiSalesData.map((sale, index) => `
+                <div class="main-article-item" data-id="${sale.id}" style="display: flex; align-items: center; padding: 10px 12px; border-bottom: 1px solid rgba(148, 163, 184, 0.05); width: 100%;">
+                    <div style="flex: 0.5; text-align: center;">
+                        <input type="checkbox" class="kiwi-sales-checkbox" value="${sale.id}" onchange="updateKiwiSalesDeleteButton()" style="
+                            width: 14px;
+                            height: 14px;
+                            accent-color: #22c55e;
+                            cursor: pointer;
+                        ">
+                    </div>
+                    <div class="main-article-index" style="flex: 0.8; text-align: center; color: #94a3b8; font-size: 12px;">${index + 1}</div>
+                    <div class="main-article-customer" style="flex: 1.2; color: #e2e8f0; font-size: 13px; text-align: left; padding: 0 5px;">${escapeHtml(sale.customer_name)}</div>
+                    <div class="main-article-phone" style="flex: 1.2; color: #94a3b8; font-size: 12px; text-align: left; padding: 0 5px;">${escapeHtml(sale.phone)}</div>
+                    <div class="main-article-address" style="flex: 2; color: #94a3b8; font-size: 12px; text-align: left; padding: 0 5px; word-break: break-word;">${escapeHtml(sale.address)}</div>
+                    <div class="main-article-order-date" style="flex: 1; color: #94a3b8; font-size: 12px; text-align: center; white-space: nowrap;">${sale.order_date}</div>
+                    <div class="main-article-status" style="flex: 1; text-align: center;"><span class="status-pill ${(sale.status === '已发货') ? 'shipped' : 'unshipped'}">${sale.status || '未发货'}</span></div>
+                    <div class="main-article-tracking" style="flex: 1.5; font-size: 12px; text-align: left; padding: 0 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                        ${sale.tracking_number ? `<a href="https://www.kuaidi100.com/?nu=${encodeURIComponent(sale.tracking_number)}" target="_blank" style="color: #60a5fa; text-decoration: none; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'" title="点击查看物流信息"><i class="fa fa-truck" style="font-size: 10px;"></i>${escapeHtml(sale.tracking_number)}</a>` : '<span style="color: #94a3b8;">-</span>'}
+                    </div>
+                    <div class="main-article-remark" style="flex: 0.8; color: #94a3b8; font-size: 12px; text-align: center;">${sale.remark || '-'}</div>
+                    <div class="main-article-quantity" style="flex: 0.6; color: #94a3b8; font-size: 12px; text-align: center;">${sale.quantity || 0}</div>
+                    <div class="main-article-payment" style="flex: 0.8; color: #2dd4bf; font-size: 12px; font-weight: 600; text-align: center;">${(sale.payment_amount || 0).toFixed(2)}</div>
+                    <div class="main-article-actions" style="flex: 0.8; display: flex; gap: 6px; justify-content: center;">
+                        <button class="action-icon-btn edit" onclick="editKiwiSale(${sale.id})" title="编辑订单"><i class="fa fa-pencil"></i></button>
+                        <button class="action-icon-btn delete" onclick="deleteKiwiSale(${sale.id})" title="删除订单"><i class="fa fa-trash"></i></button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function renderKiwiSalesPagination() {
+            const pagination = document.getElementById('kiwiSalesPagination');
+            if (!pagination) return;
+            
+            const totalPages = Math.ceil(kiwiSalesTotal / kiwiSalesPageSize);
+            let paginationHTML = `<div style="display:flex;align-items:center;gap:8px;margin-right:12px;"><span style="color:#94a3b8;font-size:12px;">每页</span><select onchange="changeKiwiSalesPageSize(this.value)" style="padding:4px 8px;border:1px solid rgba(148,163,184,0.2);border-radius:4px;background:rgba(30,41,59,0.8);color:#cbd5e1;font-size:12px;">`;
+            [5,10,15].forEach(s => { paginationHTML += `<option value="${s}" ${kiwiSalesPageSize===s?'selected':''}>${s}</option>`; });
+            paginationHTML += `</select><span style="color:#94a3b8;font-size:12px;">条</span></div>`;
+            
+            if (totalPages > 1) {
+                const showPages = 5;
+                let startPage = Math.max(1, kiwiSalesCurrentPage - Math.floor(showPages / 2));
+                let endPage = Math.min(totalPages, startPage + showPages - 1);
+                if (endPage - startPage < showPages - 1) startPage = Math.max(1, endPage - showPages + 1);
+                paginationHTML += `<button onclick="changeKiwiSalesPage(1)" class="page-btn" ${kiwiSalesCurrentPage===1?'disabled':''}>首页</button>`;
+                paginationHTML += `<button onclick="changeKiwiSalesPage(${kiwiSalesCurrentPage - 1})" class="page-btn" ${kiwiSalesCurrentPage===1?'disabled':''}>上一页</button>`;
+                for (let i = startPage; i <= endPage; i++) {
+                    paginationHTML += `<button onclick="changeKiwiSalesPage(${i})" class="page-btn ${kiwiSalesCurrentPage===i?'active':''}">${i}</button>`;
+                }
+                paginationHTML += `<button onclick="changeKiwiSalesPage(${kiwiSalesCurrentPage + 1})" class="page-btn" ${kiwiSalesCurrentPage===totalPages?'disabled':''}>下一页</button>`;
+                paginationHTML += `<button onclick="changeKiwiSalesPage(${totalPages})" class="page-btn" ${kiwiSalesCurrentPage===totalPages?'disabled':''}>末页</button>`;
+            }
+            paginationHTML += `<span style="color:#94a3b8;font-size:12px;margin-left:12px;">共 ${kiwiSalesTotal} 条，第 ${kiwiSalesCurrentPage}/${totalPages || 1} 页</span>`;
+            pagination.innerHTML = paginationHTML;
+        }
+        
+        function changeKiwiSalesPageSize(size) {
+            kiwiSalesPageSize = parseInt(size, 10);
+            kiwiSalesCurrentPage = 1;
+            loadKiwiSales();
+        }
+        
+        function changeKiwiSalesPage(page) {
+            const totalPages = Math.ceil(kiwiSalesTotal / kiwiSalesPageSize);
+            if (page < 1 || page > totalPages) return;
+            kiwiSalesCurrentPage = page;
+            loadKiwiSales();
+        }
+        
+        function showKiwiReportPage() {
+            window.scrollTo(0, 0);
+            // 隐藏文章工具栏
+            const toolbar = document.querySelector('.toolbar');
+            if (toolbar) {
+                toolbar.style.display = 'none';
+            }
+            updateStatsBarVisibility(true);
+            const currentYear = new Date().getFullYear();
+            let yearOptions = '';
+            for (let y = currentYear + 1; y >= 2024; y--) {
+                yearOptions += `<option value="${y}" ${y === currentYear ? 'selected' : ''}>${y}年</option>`;
+            }
+            document.getElementById('articleList').innerHTML = `
+                <div id="kiwiReportSection" style="padding: 20px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <div style="display:flex;align-items:center;gap:10px;">
+                            <label style="font-size:12px;color:#94a3b8;">年份：</label>
+                            <select id="kiwiReportYear" onchange="loadKiwiReport()" style="padding:8px 12px;border:1px solid rgba(148,163,184,0.2);border-radius:6px;background:rgba(30,41,59,0.8);color:#cbd5e1;font-size:12px;">
+                                ${yearOptions}
+                            </select>
+                        </div>
+                        <h2 style="color: #94a3b8; margin: 0; font-size: 18px; text-align: center; flex: 1; font-weight: 500;"><i class="fa fa-lemon-o" style="color: #7CFC00; margin-right: 8px;"></i> 销售报表统计</h2>
+                        <div style="width:120px;"></div>
+                    </div>
+                    <div id="kiwiReportStats" style="margin-bottom:20px;"></div>
+                    <div id="kiwiReportContent"></div>
+                </div>
+            `;
+            loadKiwiReport();
+        }
+        
+        // 猕猴桃销售报表统计模块
+        let kiwiReportData = [];
+        let kiwiReportPage = 1;
+        let kiwiReportPageSize = 5;
+        let kiwiReportTotalPages = 1;
+        let kiwiReportTotalCustomers = 0;
+        
+        async function loadKiwiReport() {
+            try {
+                const yearSelect = document.getElementById('kiwiReportYear');
+                const year = yearSelect ? yearSelect.value : new Date().getFullYear();
+                const response = await fetchWithTimeout(`${API_URL}/kiwi-sales-report?page=${kiwiReportPage}&page_size=${kiwiReportPageSize}&year=${year}`, {
+                    headers: getAuthHeaders()
+                });
+                if (!response.ok) throw new Error('加载报表失败');
+                const data = await response.json();
+                kiwiReportData = data.report || [];
+                kiwiReportPage = data.page || 1;
+                kiwiReportPageSize = data.page_size || 10;
+                kiwiReportTotalPages = data.total_pages || 1;
+                kiwiReportTotalCustomers = data.total_customers || 0;
+                renderKiwiReportStats(data.summary);
+                renderKiwiReport();
+            } catch (error) {
+                console.error('加载报表失败:', error);
+                const el = document.getElementById('kiwiReportStats');
+                if (el) el.innerHTML = '<div class="error-message">加载失败，请刷新重试</div>';
+            }
+        }
+        
+        function renderKiwiReportStats(summary) {
+            const el = document.getElementById('kiwiReportStats');
+            if (!el || !summary) return;
+            el.innerHTML = `
+                <div style="display:flex;gap:16px;flex-wrap:wrap;">
+                    <div style="flex:1;min-width:140px;background:rgba(124,252,0,0.1);border:1px solid rgba(124,252,0,0.2);border-radius:10px;padding:16px;text-align:center;">
+                        <div style="font-size:24px;font-weight:700;color:#7CFC00;">${summary['5斤装'].quantity || 0}</div>
+                        <div style="font-size:12px;color:#94a3b8;margin-top:4px;">5斤装</div>
+                    </div>
+                    <div style="flex:1;min-width:140px;background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.2);border-radius:10px;padding:16px;text-align:center;">
+                        <div style="font-size:24px;font-weight:700;color:#3b82f6;">${summary['10斤装'].quantity || 0}</div>
+                        <div style="font-size:12px;color:#94a3b8;margin-top:4px;">10斤装</div>
+                    </div>
+                    <div style="flex:1;min-width:140px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.2);border-radius:10px;padding:16px;text-align:center;">
+                        <div style="font-size:24px;font-weight:700;color:#22c55e;">${summary.total_quantity || 0}</div>
+                        <div style="font-size:12px;color:#94a3b8;margin-top:4px;">总数量</div>
+                    </div>
+                    <div style="flex:1;min-width:140px;background:rgba(45,212,191,0.1);border:1px solid rgba(45,212,191,0.2);border-radius:10px;padding:16px;text-align:center;">
+                        <div style="font-size:24px;font-weight:700;color:#2dd4bf;">¥${(summary.total_amount || 0).toFixed(2)}</div>
+                        <div style="font-size:12px;color:#94a3b8;margin-top:4px;">总金额</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderKiwiReport() {
+            const container = document.getElementById('kiwiReportContent');
+            if (!container) return;
+            
+            if (kiwiReportData.length === 0) {
+                container.innerHTML = '<div style="padding: 40px; text-align: center; color: #64748b; font-size: 14px;">暂无报表数据</div>';
+                return;
+            }
+            
+            // 计算规格汇总
+            const specSummary = {};
+            let totalGrandAmount = 0;
+            
+            kiwiReportData.forEach(item => {
+                const spec = item.remark || '未分类';
+                if (!specSummary[spec]) {
+                    specSummary[spec] = {
+                        quantity: 0,
+                        amount: 0
+                    };
+                }
+                specSummary[spec].quantity += item.total_quantity || 0;
+                specSummary[spec].amount += item.total_amount || 0;
+                totalGrandAmount += item.total_amount || 0;
+            });
+            
+            // 计算总数量
+            let totalGrandQuantity = 0;
+            Object.values(specSummary).forEach(spec => {
+                totalGrandQuantity += spec.quantity;
+            });
+            
+            // 按客户名分组汇总
+            const grouped = {};
+            kiwiReportData.forEach(item => {
+                if (!grouped[item.customer_name]) {
+                    grouped[item.customer_name] = {
+                        customer_name: item.customer_name,
+                        items: [],
+                        total_quantity: 0,
+                        total_amount: 0
+                    };
+                }
+                grouped[item.customer_name].items.push(item);
+                grouped[item.customer_name].total_quantity += item.total_quantity || 0;
+                grouped[item.customer_name].total_amount += item.total_amount || 0;
+            });
+            
+            let html = '';
+            
+            // 表格容器
+            html += `<div style="background:rgba(30,41,59,0.8);border-radius:12px;border:1px solid rgba(148,163,184,0.1);overflow:hidden;">`;
+            html += `<table style="width:100%;border-collapse:collapse;">`;
+            
+            // 表头
+            html += `<thead><tr style="background:rgba(15,23,42,0.5);">`;
+            html += `<th style="padding:12px 16px;color:#94a3b8;font-size:15px;font-weight:700;text-align:center;border-bottom:1px solid rgba(148,163,184,0.1);width:10%;">序号</th>`;
+            html += `<th style="padding:12px 16px;color:#94a3b8;font-size:15px;font-weight:700;text-align:left;border-bottom:1px solid rgba(148,163,184,0.1);width:25%;">姓名</th>`;
+            html += `<th style="padding:12px 16px;color:#7CFC00;font-size:15px;font-weight:700;text-align:center;border-bottom:1px solid rgba(148,163,184,0.1);width:15%;">5斤装</th>`;
+            html += `<th style="padding:12px 16px;color:#3b82f6;font-size:15px;font-weight:700;text-align:center;border-bottom:1px solid rgba(148,163,184,0.1);width:15%;">10斤装</th>`;
+            html += `<th style="padding:12px 16px;color:#94a3b8;font-size:15px;font-weight:700;text-align:center;border-bottom:1px solid rgba(148,163,184,0.1);width:15%;">总数量</th>`;
+            html += `<th style="padding:12px 16px;color:#94a3b8;font-size:15px;font-weight:700;text-align:right;border-bottom:1px solid rgba(148,163,184,0.1);width:20%;">总金额</th>`;
+            html += `</tr></thead>`;
+            
+            // 数据行
+            html += `<tbody>`;
+            Object.values(grouped).forEach((customer, index) => {
+                let qty5 = 0, qty10 = 0;
+                customer.items.forEach(item => {
+                    if (item.remark === '5斤装') qty5 += item.total_quantity || 0;
+                    if (item.remark === '10斤装') qty10 += item.total_quantity || 0;
+                });
+                const bgColor = index % 2 === 0 ? 'transparent' : 'rgba(148,163,184,0.03)';
+                html += `<tr style="background:${bgColor};transition:background 0.2s;" onmouseover="this.style.background='rgba(96,165,250,0.1)'" onmouseout="this.style.background='${bgColor}'">`;
+                html += `<td style="padding:10px 16px;color:#94a3b8;font-size:14px;text-align:center;border-bottom:1px solid rgba(148,163,184,0.05);">${index + 1}</td>`;
+                html += `<td style="padding:10px 16px;color:#e2e8f0;font-size:14px;text-align:left;border-bottom:1px solid rgba(148,163,184,0.05);">${escapeHtml(customer.customer_name)}</td>`;
+                html += `<td style="padding:10px 16px;color:#7CFC00;font-size:14px;text-align:center;border-bottom:1px solid rgba(148,163,184,0.05);font-weight:600;">${qty5 || '-'}</td>`;
+                html += `<td style="padding:10px 16px;color:#3b82f6;font-size:14px;text-align:center;border-bottom:1px solid rgba(148,163,184,0.05);font-weight:600;">${qty10 || '-'}</td>`;
+                html += `<td style="padding:10px 16px;color:#22c55e;font-size:14px;text-align:center;border-bottom:1px solid rgba(148,163,184,0.05);">${customer.total_quantity}</td>`;
+                html += `<td style="padding:10px 16px;color:#22c55e;font-size:14px;text-align:right;border-bottom:1px solid rgba(148,163,184,0.05);">¥${customer.total_amount.toFixed(2)}</td>`;
+                html += `</tr>`;
+            });
+            html += `</tbody></table></div>`;
+            
+            // 添加分页控件（参考加班记录风格）
+            const totalPages = kiwiReportTotalPages || Math.ceil(kiwiReportTotalCustomers / kiwiReportPageSize || 1);
+            html += `<div style="display:flex;align-items:center;gap:8px;padding:12px;background:rgba(30,41,59,0.5);border-radius:8px;border:1px solid rgba(148,163,184,0.1);">`;
+                html += `<div style="display:flex;align-items:center;gap:8px;margin-right:12px;"><span style="color:#94a3b8;font-size:12px;">每页</span><select onchange="changeKiwiReportPageSize(this.value)" style="padding:4px 8px;border:1px solid rgba(148,163,184,0.2);border-radius:4px;background:rgba(30,41,59,0.8);color:#cbd5e1;font-size:12px;">`;
+                [5,10,15].forEach(s => { html += `<option value="${s}" ${kiwiReportPageSize===s?'selected':''}>${s}</option>`; });
+                html += `</select><span style="color:#94a3b8;font-size:12px;">条</span></div>`;
+                
+            if (totalPages > 1) {
+                html += `<button onclick="goToReportPage(1)" ${kiwiReportPage===1?'disabled':''} style="padding:6px 12px;border:1px solid rgba(148,163,184,0.2);background:rgba(30,41,59,0.8);color:#cbd5e1;border-radius:6px;cursor:pointer;font-size:12px;${kiwiReportPage===1?'opacity:0.5;cursor:not-allowed;':''}">首页</button>`;
+                html += `<button onclick="goToReportPage(${kiwiReportPage - 1})" ${kiwiReportPage === 1 ? 'disabled' : ''} style="padding:6px 12px;border:1px solid rgba(148,163,184,0.2);background:rgba(30,41,59,0.8);color:#cbd5e1;border-radius:6px;cursor:pointer;font-size:12px;${kiwiReportPage === 1 ? 'opacity:0.5;cursor:not-allowed;':''}">上一页</button>`;
+                const showPages = 5;
+                let startPage = Math.max(1, kiwiReportPage - Math.floor(showPages / 2));
+                let endPage = Math.min(totalPages, startPage + showPages - 1);
+                if (endPage - startPage < showPages - 1) startPage = Math.max(1, endPage - showPages + 1);
+                for (let i = startPage; i <= endPage; i++) {
+                    html += `<button onclick="goToReportPage(${i})" style="padding:6px 12px;border:1px solid ${kiwiReportPage===i?'rgba(96,165,250,0.5)':'rgba(148,163,184,0.2)'};background:${kiwiReportPage===i?'rgba(96,165,250,0.15)':'rgba(30,41,59,0.8)'};color:${kiwiReportPage===i?'#60a5fa':'#cbd5e1'};border-radius:6px;cursor:pointer;font-size:12px;">${i}</button>`;
+                }
+                html += `<button onclick="goToReportPage(${kiwiReportPage + 1})" ${kiwiReportPage === totalPages ? 'disabled' : ''} style="padding:6px 12px;border:1px solid rgba(148,163,184,0.2);background:rgba(30,41,59,0.8);color:#cbd5e1;border-radius:6px;cursor:pointer;font-size:12px;${kiwiReportPage===totalPages?'opacity:0.5;cursor:not-allowed;':''}">下一页</button>`;
+                html += `<button onclick="goToReportPage(${totalPages})" ${kiwiReportPage === totalPages ? 'disabled' : ''} style="padding:6px 12px;border:1px solid rgba(148,163,184,0.2);background:rgba(30,41,59,0.8);color:#cbd5e1;border-radius:6px;cursor:pointer;font-size:12px;${kiwiReportPage===totalPages?'opacity:0.5;cursor:not-allowed;':''}">末页</button>`;
+                html += `<span style="color:#94a3b8;font-size:12px;margin-left:12px;">共 ${kiwiReportTotalCustomers} 个客户，第 ${kiwiReportPage}/${totalPages || 1} 页</span>`;
+                html += `</div>`;
+            }
+            
+            container.innerHTML = html;
+        }
+        
+        function goToReportPage(page) {
+            if (page < 1 || page > kiwiReportTotalPages) return;
+            kiwiReportPage = page;
+            loadKiwiReport();
+        }
+        
+        function changeKiwiReportPageSize(size) {
+            kiwiReportPageSize = parseInt(size, 10);
+            kiwiReportPage = 1;
+            loadKiwiReport();
+        }
+        
+        function toggleSelectAllKiwiSales(source) {
+            const checkboxes = document.querySelectorAll('.kiwi-sales-checkbox');
+            checkboxes.forEach(cb => cb.checked = source.checked);
+            updateKiwiSalesDeleteButton();
+        }
+        
+        function updateKiwiSalesDeleteButton() {
+            const checkboxes = document.querySelectorAll('.kiwi-sales-checkbox:checked');
+            const count = checkboxes.length;
+            const deleteBtn = document.getElementById('deleteKiwiSalesBtn');
+            
+            if (count > 0) {
+                deleteBtn.style.display = 'inline-block';
+                deleteBtn.textContent = `删除选中 (${count})`;
+            } else {
+                deleteBtn.style.display = 'none';
+            }
+        }
+        
+        async function deleteSelectedKiwiSales() {
+            const checkedBoxes = document.querySelectorAll('.kiwi-sales-checkbox:checked');
+            const saleIds = Array.from(checkedBoxes).map(cb => parseInt(cb.value));
+            
+            if (saleIds.length === 0) {
+                alert('请先选择要删除的订单');
+                return;
+            }
+            
+            if (!confirm(`确定要删除这 ${saleIds.length} 条订单吗？`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetchWithTimeout(`${API_URL}/kiwi-sales/batch-delete`, {
+                    method: 'POST',
+                    headers: {
+                        ...getAuthHeaders(),
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ ids: saleIds })
+                });
+                
+                if (response.ok) {
+                    kiwiSalesCurrentPage = 1;
+                    loadKiwiSales();
+                    loadKiwiSalesCount(); // 更新订单数量
+                    
+                    // 清除选中状态，隐藏删除按钮
+                    const selectAll = document.getElementById('selectAllKiwiSales');
+                    if (selectAll) selectAll.checked = false;
+                    const checkboxes = document.querySelectorAll('.kiwi-sales-checkbox');
+                    checkboxes.forEach(cb => cb.checked = false);
+                    updateKiwiSalesDeleteButton();
+                    
+                    const result = await response.json();
+                    alert(result.message || `成功删除 ${saleIds.length} 条订单！`);
+                } else {
+                    throw new Error('删除订单失败');
+                }
+            } catch (error) {
+                console.error('删除订单失败:', error);
+                alert('删除失败，请稍后重试');
+            }
+        }
+        
+        function openKiwiSalesModal(id = null) {
+            document.getElementById('kiwiSalesModal').classList.add('active');
+            document.getElementById('kiwiSalesForm').reset();
+            document.getElementById('kiwiSaleId').value = '';
+            document.getElementById('kiwiSalesModalTitle').textContent = '新增订单';
+            if (id) {
+                const sale = kiwiSalesData.find(s => s.id === id);
+                if (sale) {
+                    document.getElementById('kiwiSaleId').value = sale.id;
+                    _$('kiwiCustomerName').value = sale.customer_name;
+                    _$('kiwiPhone').value = sale.phone;
+                    _$('kiwiAddress').value = sale.address;
+                    _$('kiwiOrderDate').value = sale.order_date;
+                    _$('kiwiTrackingNumber').value = sale.tracking_number || '';
+                    _$('kiwiRemark').value = sale.remark || '';
+                    document.getElementById('kiwiStatus').value = sale.status || '未发货';
+                    _$('kiwiQuantity').value = sale.quantity || 0;
+                    _$('kiwiPaymentAmount').value = sale.payment_amount || 0.00;
+                    document.getElementById('kiwiSalesModalTitle').textContent = '编辑订单';
+                }
+            }
+        }
+        
+        function closeKiwiSalesModal() {
+            document.getElementById('kiwiSalesModal').classList.remove('active');
+        }
+        
+        async function saveKiwiSale(event) {
+            if (window._submitting) return;
+            window._submitting = true;
+            try {
+                event.preventDefault();
+            
+            // 表单验证
+            const customerName = _$('kiwiCustomerName').value.trim();
+            const phone = _$('kiwiPhone').value.trim();
+            const address = _$('kiwiAddress').value.trim();
+            const orderDate = _$('kiwiOrderDate').value;
+            const status = document.getElementById('kiwiStatus').value;
+            const trackingNumber = _$('kiwiTrackingNumber').value.trim();
+            const remark = _$('kiwiRemark').value.trim();
+            const quantity = parseInt(_$('kiwiQuantity').value);
+            if (isNaN(quantity) || quantity <= 0) { alert('数量必须大于0'); return; }
+            const paymentAmount = parseFloat(_$('kiwiPaymentAmount').value);
+            if (isNaN(paymentAmount) || paymentAmount < 0) { alert('金额不能为负数'); return; }
+
+            // 客户名校验
+            if (!customerName) {
+                alert('请输入客户名');
+                _$('kiwiCustomerName').focus();
+                return;
+            }
+            if (customerName.length > 50) {
+                alert('客户名不能超过50个字符');
+                _$('kiwiCustomerName').focus();
+                return;
+            }
+            
+            // 电话校验
+            if (!phone) {
+                alert('请输入电话号码');
+                _$('kiwiPhone').focus();
+                return;
+            }
+            if (!/^\d{11}$/.test(phone)) {
+                alert('请输入有效的11位手机号码');
+                _$('kiwiPhone').focus();
+                return;
+            }
+            
+            // 地址校验
+            if (!address) {
+                alert('请输入收货地址');
+                _$('kiwiAddress').focus();
+                return;
+            }
+            if (address.length > 200) {
+                alert('地址不能超过200个字符');
+                _$('kiwiAddress').focus();
+                return;
+            }
+            
+            // 接单日期校验
+            if (!orderDate) {
+                alert('请选择接单日期');
+                _$('kiwiOrderDate').focus();
+                return;
+            }
+
+            
+
+            
+            // 运单号校验
+            if (trackingNumber && trackingNumber.length > 50) {
+                alert('运单号不能超过50个字符');
+                _$('kiwiTrackingNumber').focus();
+                return;
+            }
+            
+            // 构建数据
+            const id = document.getElementById('kiwiSaleId').value;
+            const data = {
+                customer_name: customerName,
+                phone: phone,
+                address: address,
+                order_date: orderDate,
+                status: status,
+                tracking_number: trackingNumber,
+                remark: remark,
+                quantity: quantity,
+                payment_amount: paymentAmount
+            };
+            
+            try {
+                const url = id ? `${API_URL}/kiwi-sales/${id}` : `${API_URL}/kiwi-sales`;
+                const method = id ? 'PUT' : 'POST';
+                const response = await fetchWithTimeout(url, {
+                    method,
+                    headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                if (!response.ok) throw new Error('保存失败');
+                closeKiwiSalesModal();
+                loadKiwiSales();
+                loadKiwiSalesCount(); // 更新订单数量
+                alert(id ? '更新成功' : '添加成功');
+            } catch (error) {
+                alert(error.message);
+            }
+            } finally {
+                window._submitting = false;
+            }
+        }
+        
+        function editKiwiSale(id) {
+            openKiwiSalesModal(id);
+        }
+        
+        async function deleteKiwiSale(id) {
+            if (!confirm('确定要删除这条订单吗？')) return;
+            try {
+                const response = await fetchWithTimeout(`${API_URL}/kiwi-sales/${id}`, {
+                    method: 'DELETE',
+                    headers: getAuthHeaders()
+                });
+                if (!response.ok) throw new Error('删除失败');
+                loadKiwiSales();
+                loadKiwiSalesCount(); // 更新订单数量
+                
+                // 清除选中状态，隐藏删除按钮
+                const selectAll = document.getElementById('selectAllKiwiSales');
+                if (selectAll) selectAll.checked = false;
+                const checkboxes = document.querySelectorAll('.kiwi-sales-checkbox');
+                checkboxes.forEach(cb => cb.checked = false);
+                updateKiwiSalesDeleteButton();
+                
+                alert('删除成功');
+            } catch (error) {
+                alert(error.message);
+            }
+        }
+
+        // ===== 记账模块 =====
+        let expenseData = [];
+        let expenseTotal = 0;
+        let expenseCurrentPage = 1;
+        let expensePageSize = 5;
+        let expenseMonthFilter = '';
+        let expenseCategoryFilter = '';
+        let selectedExpenseIds = new Set();
+        const EXPENSE_CATEGORIES = ['燃气费', '电费', '话费', '网费', '暖气费', '香烟', '菜肉米面油', '交通', '物业费', '水果', '其他'];
+        const EXPENSE_COLORS = {'燃气费':'#ef4444','电费':'#f97316','话费':'#3b82f6','网费':'#8b5cf6','暖气费':'#f59e0b','香烟':'#6b7280','菜肉米面油':'#22c55e','交通':'#06b6d4','物业费':'#d97706','水果':'#ec4899','其他':'#a78bfa'};
+
+        async function loadExpenses() {
+            try {
+                let url = `${API_URL}/expenses?page=${expenseCurrentPage}&page_size=${expensePageSize}`;
+                if (expenseMonthFilter) url += `&month=${expenseMonthFilter}`;
+                if (expenseCategoryFilter) url += `&category=${encodeURIComponent(expenseCategoryFilter)}`;
+                const response = await fetchWithTimeout(url, { headers: getAuthHeaders() });
+                if (!response.ok) throw new Error('加载失败');
+                const result = await response.json();
+                expenseData = result.records;
+                expenseTotal = result.total;
+                document.getElementById('expenseCount').textContent = expenseTotal;
+                renderExpenseTable();
+                renderExpensePagination();
+                const selectAll = document.getElementById('selectAllExpense');
+                if (selectAll) selectAll.checked = false;
+                updateExpenseDeleteBtn();
+            } catch (error) {
+                console.error('加载记账记录失败:', error);
+                const el = document.getElementById('expenseTableBody');
+                if (el) el.innerHTML = '<div class="empty-state-card"><i class="fa fa-exclamation-triangle"></i><p>加载失败，请刷新重试</p></div>';
+            }
+        }
+
+        function renderExpenseTable() {
+            const tbody = document.getElementById('expenseTableBody');
+            if (!tbody) return;
+            if (expenseData.length === 0) {
+                tbody.innerHTML = '<div class="empty-state-card"><i class="fa fa-inbox"></i><p>暂无消费记录</p></div>';
+                return;
+            }
+            tbody.innerHTML = expenseData.map((r, i) => `
+                <div class="data-row" style="display:grid;grid-template-columns:40px 50px 100px 80px 100px 1fr 100px;align-items:center;padding:12px 16px;border-bottom:1px solid rgba(148,163,184,0.1);font-size:13px;">
+                    <div style="display:flex;align-items:center;justify-content:center;"><input type="checkbox" class="expense-checkbox" data-id="${r.id}" onchange="toggleExpenseSelect(${r.id})" ${selectedExpenseIds.has(r.id)?'checked':''} style="cursor:pointer;"></div>
+                    <div style="color:#94a3b8;">${(expenseCurrentPage - 1) * expensePageSize + i + 1}</div>
+                    <div><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:${EXPENSE_COLORS[r.category] || '#64748b'}22;color:${EXPENSE_COLORS[r.category] || '#64748b'};">${escapeHtml(r.category)}</span></div>
+                    <div style="color:#2dd4bf;font-weight:600;">¥${parseFloat(r.amount).toFixed(2)}</div>
+                    <div style="color:#94a3b8;">${r.date}</div>
+                    <div style="color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${r.remark || ''}">${r.remark || '-'}</div>
+                    <div style="display:flex;gap:6px;justify-content:flex-end;">
+                        <button onclick="editExpense(${r.id})" class="action-icon-btn edit" title="编辑"><i class="fa fa-pencil"></i></button>
+                        <button onclick="deleteExpense(${r.id})" class="action-icon-btn delete" title="删除"><i class="fa fa-trash"></i></button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function renderExpensePagination() {
+            const el = document.getElementById('expensePagination');
+            if (!el) return;
+            const totalPages = Math.ceil(expenseTotal / expensePageSize);
+            let html = `<div style="display:flex;align-items:center;gap:8px;margin-right:12px;"><span style="color:#94a3b8;font-size:12px;">每页</span><select onchange="changeExpensePageSize(this.value)" style="padding:4px 8px;border:1px solid rgba(148,163,184,0.2);border-radius:4px;background:rgba(30,41,59,0.8);color:#cbd5e1;font-size:12px;">`;
+            [5,10,15].forEach(s => { html += `<option value="${s}" ${expensePageSize===s?'selected':''}>${s}</option>`; });
+            html += `</select><span style="color:#94a3b8;font-size:12px;">条</span></div>`;
+            if (totalPages > 1) {
+                const showPages = 5;
+                let startPage = Math.max(1, expenseCurrentPage - Math.floor(showPages / 2));
+                let endPage = Math.min(totalPages, startPage + showPages - 1);
+                if (endPage - startPage < showPages - 1) startPage = Math.max(1, endPage - showPages + 1);
+                html += `<button onclick="changeExpensePage(1)" class="page-btn" ${expenseCurrentPage===1?'disabled':''}>首页</button>`;
+                html += `<button onclick="changeExpensePage(${expenseCurrentPage-1})" class="page-btn" ${expenseCurrentPage===1?'disabled':''}>上一页</button>`;
+                for (let i = startPage; i <= endPage; i++) {
+                    html += `<button onclick="changeExpensePage(${i})" class="page-btn ${expenseCurrentPage===i?'active':''}">${i}</button>`;
+                }
+                html += `<button onclick="changeExpensePage(${expenseCurrentPage+1})" class="page-btn" ${expenseCurrentPage===totalPages?'disabled':''}>下一页</button>`;
+                html += `<button onclick="changeExpensePage(${totalPages})" class="page-btn" ${expenseCurrentPage===totalPages?'disabled':''}>末页</button>`;
+            }
+            html += `<span style="color:#94a3b8;font-size:12px;margin-left:12px;">共 ${expenseTotal} 条，第 ${expenseCurrentPage}/${totalPages || 1} 页</span>`;
+            el.innerHTML = html;
+        }
+
+        function changeExpensePageSize(size) {
+            expensePageSize = parseInt(size);
+            expenseCurrentPage = 1;
+            loadExpenses();
+        }
+
+        function changeExpensePage(page) {
+            const totalPages = Math.ceil(expenseTotal / expensePageSize);
+            if (page < 1 || page > totalPages) return;
+            expenseCurrentPage = page;
+            loadExpenses();
+        }
+
+        function showExpenses() {
+            window.scrollTo(0, 0);
+            expenseCurrentPage = 1;
+            expenseMonthFilter = '';
+            expenseCategoryFilter = '';
+            selectedExpenseIds.clear();
+            const toolbar = document.querySelector('.toolbar');
+            if (toolbar) toolbar.style.display = 'none';
+            updateStatsBarVisibility(true);
+            const now = new Date();
+            const defaultMonth = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+            document.getElementById('articleList').innerHTML = `
+                <div id="expenseSection" style="padding: 20px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+                        <h2 style="color:#94a3b8;margin:0;font-size:18px;text-align:center;flex:1;font-weight:500;"><i class="fa fa-money" style="color:#14b8a6;margin-right:8px;"></i> 消费记录</h2>
+                        <div style="margin-left:20px;display:flex;gap:8px;">
+                            <button class="btn btn-secondary" onclick="openExpenseModal()" style="padding:12px 24px;border:1px solid rgba(148,163,184,0.1);background:rgba(255,255,255,0.05);color:#cbd5e1;border-radius:12px;cursor:pointer;font-size:14px;font-weight:600;transition:all 0.3s ease;">+ 新增记录</button>
+                        </div>
+                    </div>
+                    <div style="display:flex;align-items:center;margin-bottom:15px;gap:10px;">
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <label style="font-size:12px;color:#94a3b8;">月份：</label>
+                            <input type="month" id="expenseMonthFilter" value="${defaultMonth}" onchange="filterExpenseByMonth()" style="padding:8px 12px;border:1px solid rgba(148,163,184,0.2);border-radius:6px;background:rgba(30,41,59,0.8);color:#cbd5e1;font-size:12px;">
+                        </div>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <label style="font-size:12px;color:#94a3b8;">分类：</label>
+                            <select id="expenseCategoryFilter" onchange="filterExpenseByCategory()" style="padding:8px 12px;border:1px solid rgba(148,163,184,0.2);border-radius:6px;background:rgba(30,41,59,0.8);color:#cbd5e1;font-size:12px;">
+                                <option value="">全部分类</option>
+                                ${EXPENSE_CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join('')}
+                            </select>
+                        </div>
+                        <button class="btn btn-secondary" onclick="resetExpenseFilter()" style="padding:8px 16px;font-size:12px;font-weight:500;"><i class="fa fa-refresh"></i> 重置</button>
+                        <button class="btn btn-primary" onclick="exportExpenses()" style="padding:8px 16px;font-size:12px;font-weight:500;"><i class="fa fa-download"></i> 导出</button>
+                        <button class="btn btn-danger" id="deleteSelectedExpenseBtn" onclick="deleteSelectedExpenses()" style="padding:8px 16px;font-size:12px;font-weight:500;display:none;"><i class="fa fa-trash"></i> 删除选中 (<span id="selectedExpenseCount">0</span>)</button>
+                    </div>
+                    <div style="border:1px solid rgba(148,163,184,0.1);border-radius:10px;overflow:hidden;">
+                        <div style="display:grid;grid-template-columns:40px 50px 100px 80px 100px 1fr 100px;padding:12px 16px;background:rgba(30,41,59,0.6);border-bottom:1px solid rgba(148,163,184,0.15);font-size:12px;color:#94a3b8;font-weight:600;">
+                            <div style="display:flex;align-items:center;justify-content:center;"><input type="checkbox" id="selectAllExpense" onchange="toggleSelectAllExpense()" style="cursor:pointer;"></div><div>序号</div><div>分类</div><div>金额</div><div>日期</div><div>备注</div><div style="text-align:right;">操作</div>
+                        </div>
+                        <div id="expenseTableBody"></div>
+                    </div>
+                    <div id="expensePagination" style="display:flex;justify-content:center;align-items:center;gap:6px;margin-top:16px;flex-wrap:wrap;"></div>
+                </div>
+            `;
+            expenseMonthFilter = defaultMonth;
+            loadExpenses();
+        }
+
+        function filterExpenseByMonth() {
+            expenseMonthFilter = document.getElementById('expenseMonthFilter').value;
+            expenseCurrentPage = 1;
+            loadExpenses();
+        }
+
+        function filterExpenseByCategory() {
+            expenseCategoryFilter = document.getElementById('expenseCategoryFilter').value;
+            expenseCurrentPage = 1;
+            loadExpenses();
+        }
+
+        function resetExpenseFilter() {
+            const now = new Date();
+            expenseMonthFilter = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+            expenseCategoryFilter = '';
+            document.getElementById('expenseMonthFilter').value = expenseMonthFilter;
+            document.getElementById('expenseCategoryFilter').value = '';
+            expenseCurrentPage = 1;
+            loadExpenses();
+        }
+
+        function openExpenseModal(id = null) {
+            document.getElementById('expenseModal').classList.add('active');
+            document.getElementById('expenseForm').reset();
+            document.getElementById('expenseId').value = '';
+            document.getElementById('expenseModalTitle').textContent = '新增消费记录';
+            _$('expenseDate').value = new Date().toISOString().slice(0, 10);
+            if (id) {
+                const r = expenseData.find(x => x.id === id);
+                if (r) {
+                    document.getElementById('expenseId').value = r.id;
+                    _$('expenseCategory').value = r.category;
+                    _$('expenseAmount').value = r.amount;
+                    _$('expenseDate').value = r.date;
+                    _$('expenseRemark').value = r.remark || '';
+                    document.getElementById('expenseModalTitle').textContent = '编辑消费记录';
+                }
+            }
+        }
+
+        function closeExpenseModal() {
+            document.getElementById('expenseModal').classList.remove('active');
+        }
+
+        async function saveExpense(event) {
+            if (window._submitting) return;
+            window._submitting = true;
+            try {
+                event.preventDefault();
+                const id = document.getElementById('expenseId').value;
+            const data = {
+                category: _$('expenseCategory').value,
+                amount: parseFloat(_$('expenseAmount').value),
+                date: _$('expenseDate').value,
+                remark: _$('expenseRemark').value.trim()
+            };
+            if (!data.category) { alert('请选择分类'); return; }
+            if (!data.amount || data.amount <= 0) { alert('请输入有效金额'); return; }
+            if (!data.date) { alert('请选择日期'); return; }
+            try {
+                const url = id ? `${API_URL}/expenses/${id}` : `${API_URL}/expenses`;
+                const method = id ? 'PUT' : 'POST';
+                const response = await fetchWithTimeout(url, {
+                    method,
+                    headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.error || '保存失败');
+                closeExpenseModal();
+                loadExpenses();
+                loadExpenseCount();
+                alert(id ? '更新成功' : '添加成功');
+            } catch (error) {
+                alert(error.message);
+            }
+            } finally {
+                window._submitting = false;
+            }
+        }
+
+        function editExpense(id) {
+            openExpenseModal(id);
+        }
+
+        async function deleteExpense(id) {
+            if (!confirm('确定要删除这条消费记录吗？')) return;
+            try {
+                const response = await fetchWithTimeout(`${API_URL}/expenses/${id}`, {
+                    method: 'DELETE',
+                    headers: getAuthHeaders()
+                });
+                if (!response.ok) throw new Error('删除失败');
+                selectedExpenseIds.delete(id);
+                updateExpenseDeleteBtn();
+                loadExpenses();
+                loadExpenseCount();
+                alert('删除成功');
+            } catch (error) {
+                alert(error.message);
+            }
+        }
+
+        function toggleExpenseSelect(id) {
+            if (selectedExpenseIds.has(id)) {
+                selectedExpenseIds.delete(id);
+            } else {
+                selectedExpenseIds.add(id);
+            }
+            updateExpenseDeleteBtn();
+            const selectAll = document.getElementById('selectAllExpense');
+            if (selectAll) {
+                selectAll.checked = selectedExpenseIds.size === expenseData.length && expenseData.length > 0;
+            }
+        }
+
+        function toggleSelectAllExpense() {
+            const checked = document.getElementById('selectAllExpense').checked;
+            if (checked) {
+                expenseData.forEach(r => selectedExpenseIds.add(r.id));
+            } else {
+                expenseData.forEach(r => selectedExpenseIds.delete(r.id));
+            }
+            updateExpenseDeleteBtn();
+            renderExpenseTable();
+        }
+
+        function updateExpenseDeleteBtn() {
+            const btn = document.getElementById('deleteSelectedExpenseBtn');
+            const countEl = document.getElementById('selectedExpenseCount');
+            if (btn && countEl) {
+                if (selectedExpenseIds.size > 0) {
+                    btn.style.display = 'inline-flex';
+                    countEl.textContent = selectedExpenseIds.size;
+                } else {
+                    btn.style.display = 'none';
+                }
+            }
+        }
+
+        async function deleteSelectedExpenses() {
+            if (selectedExpenseIds.size === 0) return;
+            if (!confirm(`确定要删除选中的 ${selectedExpenseIds.size} 条记录吗？`)) return;
+            try {
+                const ids = Array.from(selectedExpenseIds);
+                const response = await fetchWithTimeout(`${API_URL}/expenses/batch-delete`, {
+                    method: 'POST',
+                    headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids })
+                });
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.error || '删除失败');
+                selectedExpenseIds.clear();
+                updateExpenseDeleteBtn();
+                loadExpenses();
+                loadExpenseCount();
+                alert(result.message);
+            } catch (error) {
+                alert(error.message);
+                selectedExpenseIds.clear();
+                updateExpenseDeleteBtn();
+                loadExpenses();
+                loadExpenseCount();
+            }
+        }
+
+        async function exportExpenses() {
+            const exportBtn = document.querySelector('button[onclick="exportExpenses()"]');
+            const originalText = exportBtn ? exportBtn.textContent : '';
+            try {
+                let url = `${API_URL}/expenses/export`;
+                let method = 'GET';
+                let body = null;
+                let headers = { ...getAuthHeaders() };
+                
+                if (selectedExpenseIds.size > 0) {
+                    // 如果有选中的记录，使用POST方法导出指定记录
+                    method = 'POST';
+                    headers['Content-Type'] = 'application/json';
+                    body = JSON.stringify({ ids: Array.from(selectedExpenseIds) });
+                    if (!confirm(`确定要导出选中的 ${selectedExpenseIds.size} 条记录吗？`)) return;
+                } else {
+                    // 如果没有选中，导出当前月份的记录
+                    if (!expenseMonthFilter) {
+                        const now = new Date();
+                        expenseMonthFilter = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+                    }
+                    url += `?month=${expenseMonthFilter}`;
+                    if (expenseCategoryFilter) {
+                        url += `&category=${encodeURIComponent(expenseCategoryFilter)}`;
+                    }
+                    if (!confirm(`确定要导出 ${expenseMonthFilter} 的消费记录吗？`)) return;
+                }
+
+                if (exportBtn) {
+                    exportBtn.textContent = '导出中...';
+                    exportBtn.disabled = true;
+                }
+
+                const response = await fetchWithTimeout(url, { method, headers, body });
+                if (!response.ok) throw new Error('导出失败');
+                
+                // 处理文件下载
+                const blob = await response.blob();
+                const contentDisposition = response.headers.get('Content-Disposition');
+                let filename = '消费记录.csv';
+                if (contentDisposition) {
+                    const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+                    if (filenameMatch && filenameMatch[1]) {
+                        filename = filenameMatch[1].replace(/['"]/g, '');
+                    }
+                }
+                
+                // 创建下载链接
+                const downloadUrl = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = downloadUrl;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(downloadUrl);
+                
+                // 恢复按钮
+                if (exportBtn) {
+                    exportBtn.textContent = originalText;
+                    exportBtn.disabled = false;
+                }
+
+                alert('导出成功！');
+            } catch (error) {
+                if (exportBtn) {
+                    exportBtn.textContent = originalText;
+                    exportBtn.disabled = false;
+                }
+                alert(error.message);
+            }
+        }
+
+        async function loadExpenseCount() {
+            try {
+                const response = await fetchWithTimeout(`${API_URL}/expenses?page=1&page_size=1`, { headers: getAuthHeaders() });
+                if (!response.ok) return;
+                const data = await response.json();
+                if (data && data.total !== undefined) {
+                    document.getElementById('expenseCount').textContent = data.total;
+                }
+            } catch (error) {
+                console.error('加载记账记录数量失败:', error);
+                const el = document.getElementById('expenseCount');
+                if (el) el.textContent = '加载失败';
+            }
+        }
+
+        function showExpenseStats() {
+            window.scrollTo(0, 0);
+            const toolbar = document.querySelector('.toolbar');
+            if (toolbar) toolbar.style.display = 'none';
+            updateStatsBarVisibility(true);
+            const now = new Date();
+            const currentYear = now.getFullYear();
+            const currentMonth = now.getMonth() + 1;
+            const cmStr = String(currentMonth).padStart(2, '0');
+            let yearHtml = '';
+            for (let y = currentYear; y >= currentYear - 2; y--) {
+                yearHtml += `<option value="${y}" ${y === currentYear ? 'selected' : ''}>${y}年</option>`;
+            }
+            let startMonthHtml = '';
+            for (let i = 1; i <= 12; i++) {
+                const v = String(i).padStart(2, '0');
+                startMonthHtml += `<option value="${v}" ${v === cmStr ? 'selected' : ''}>${i}月</option>`;
+            }
+            let endMonthHtml = '';
+            for (let i = 1; i <= 12; i++) {
+                const v = String(i).padStart(2, '0');
+                endMonthHtml += `<option value="${v}" ${v === cmStr ? 'selected' : ''}>${i}月</option>`;
+            }
+            document.getElementById('articleList').innerHTML = `
+                <div id="expenseStatsSection" style="padding: 20px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+                        <h2 style="color:#94a3b8;margin:0;font-size:18px;text-align:center;flex:1;font-weight:500;"><i class="fa fa-bar-chart" style="color:#14b8a6;margin-right:8px;"></i> 消费统计</h2>
+                    </div>
+                    <div style="display:flex;align-items:center;margin-bottom:20px;gap:10px;flex-wrap:wrap;">
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <label style="font-size:12px;color:#94a3b8;">年份：</label>
+                            <select id="expenseStatsYear" onchange="loadExpenseStatsData()" style="padding:8px 12px;border:1px solid rgba(148,163,184,0.2);border-radius:6px;background:rgba(30,41,59,0.8);color:#cbd5e1;font-size:12px;">${yearHtml}</select>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <label style="font-size:12px;color:#94a3b8;">从：</label>
+                            <select id="expenseStatsStartMonth" onchange="loadExpenseStatsData()" style="padding:8px 12px;border:1px solid rgba(148,163,184,0.2);border-radius:6px;background:rgba(30,41,59,0.8);color:#cbd5e1;font-size:12px;">${startMonthHtml}</select>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <label style="font-size:12px;color:#94a3b8;">至：</label>
+                            <select id="expenseStatsEndMonth" onchange="loadExpenseStatsData()" style="padding:8px 12px;border:1px solid rgba(148,163,184,0.2);border-radius:6px;background:rgba(30,41,59,0.8);color:#cbd5e1;font-size:12px;">${endMonthHtml}</select>
+                        </div>
+                        <button class="btn btn-secondary" onclick="resetExpenseStatsRange()" style="padding:8px 16px;font-size:12px;font-weight:500;"><i class="fa fa-refresh"></i> 重置</button>
+                    </div>
+                    <div id="expenseStatsCards" style="margin-bottom:24px;"></div>
+                    <div id="expenseStatsTrend" style="margin-bottom:24px;"></div>
+                    <div id="expenseStatsBar" style="margin-bottom:24px;"></div>
+                    <div id="expenseStatsTable"></div>
+                </div>
+            `;
+            loadExpenseStatsData();
+        }
+
+        async function loadExpenseStatsData() {
+            const year = document.getElementById('expenseStatsYear')?.value || new Date().getFullYear();
+            const startMonth = document.getElementById('expenseStatsStartMonth')?.value || '';
+            const endMonth = document.getElementById('expenseStatsEndMonth')?.value || '';
+            try {
+                let url = `${API_URL}/expenses/stats?year=${year}`;
+                if (startMonth) url += `&start_month=${startMonth}`;
+                if (endMonth) url += `&end_month=${endMonth}`;
+                const response = await fetchWithTimeout(url, { headers: getAuthHeaders() });
+                if (!response.ok) throw new Error('加载统计失败');
+                const data = await response.json();
+                data._year = year;
+                data._startMonth = startMonth;
+                data._endMonth = endMonth;
+                renderExpenseStatsCards(data);
+                renderExpenseStatsTrend(data);
+                renderExpenseStatsBar(data);
+                renderExpenseStatsTable(data);
+            } catch (error) {
+                console.error('加载统计失败:', error);
+                const el = document.getElementById('expenseStatsCards');
+                if (el) el.innerHTML = '<div class="error-message">加载失败，请刷新重试</div>';
+            }
+        }
+
+        function resetExpenseStatsRange() {
+            const now = new Date();
+            const m = String(now.getMonth() + 1).padStart(2, '0');
+            document.getElementById('expenseStatsYear').value = now.getFullYear();
+            document.getElementById('expenseStatsStartMonth').value = m;
+            document.getElementById('expenseStatsEndMonth').value = m;
+            loadExpenseStatsData();
+        }
+
+        function renderExpenseStatsCards(data) {
+            const el = document.getElementById('expenseStatsCards');
+            if (!el) return;
+            const totalCategories = data.categories.length;
+            const totalAmount = data.grand_total;
+            const maxCategory = data.categories.length > 0 ? data.categories[0] : null;
+            const year = data._year || new Date().getFullYear();
+            const sm = data._startMonth;
+            const em = data._endMonth;
+            let rangeLabel = `${year}年`;
+            if (sm && em && sm === em) {
+                rangeLabel = `${year}年${parseInt(sm)}月`;
+            } else if (sm && em) {
+                rangeLabel = `${year}年${parseInt(sm)}月 - ${parseInt(em)}月`;
+            } else if (sm) {
+                rangeLabel = `${year}年${parseInt(sm)}月起`;
+            } else if (em) {
+                rangeLabel = `${year}年1月 - ${parseInt(em)}月`;
+            }
+            el.innerHTML = `
+                <div style="display:flex;gap:16px;flex-wrap:wrap;">
+                    <div style="flex:1;min-width:140px;background:rgba(20,184,166,0.1);border:1px solid rgba(20,184,166,0.2);border-radius:10px;padding:16px;text-align:center;">
+                        <div style="font-size:24px;font-weight:700;color:#14b8a6;">¥${totalAmount.toFixed(2)}</div>
+                        <div style="font-size:12px;color:#94a3b8;margin-top:4px;">${rangeLabel} 总支出</div>
+                    </div>
+                    <div style="flex:1;min-width:140px;background:rgba(96,165,250,0.1);border:1px solid rgba(96,165,250,0.2);border-radius:10px;padding:16px;text-align:center;">
+                        <div style="font-size:24px;font-weight:700;color:#60a5fa;">${totalCategories}</div>
+                        <div style="font-size:12px;color:#94a3b8;margin-top:4px;">消费分类数</div>
+                    </div>
+                    <div style="flex:1;min-width:140px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);border-radius:10px;padding:16px;text-align:center;">
+                        <div style="font-size:24px;font-weight:700;color:#ef4444;">${maxCategory ? maxCategory.category : '-'}</div>
+                        <div style="font-size:12px;color:#94a3b8;margin-top:4px;">最大支出分类</div>
+                    </div>
+                    <div style="flex:1;min-width:140px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.2);border-radius:10px;padding:16px;text-align:center;">
+                        <div style="font-size:24px;font-weight:700;color:#22c55e;">¥${maxCategory ? maxCategory.amount.toFixed(2) : '0.00'}</div>
+                        <div style="font-size:12px;color:#94a3b8;margin-top:4px;">最大支出金额</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function renderExpenseStatsTrend(data) {
+            const el = document.getElementById('expenseStatsTrend');
+            if (!el) return;
+            try {
+                let url = `${API_URL}/expenses/stats/monthly?year=${data._year || new Date().getFullYear()}`;
+                if (data._startMonth) url += `&start_month=${data._startMonth}`;
+                if (data._endMonth) url += `&end_month=${data._endMonth}`;
+                const resp = await fetchWithTimeout(url, { headers: getAuthHeaders() });
+                if (!resp.ok) throw new Error('加载月度数据失败');
+                const mData = await resp.json();
+                const months = mData.months || [];
+                if (months.length === 0) {
+                    el.innerHTML = '';
+                    return;
+                }
+                const maxVal = Math.max(...months.map(m => m.total), 1);
+                const chartW = 700, chartH = 220, padL = 60, padR = 20, padT = 30, padB = 40;
+                const plotW = chartW - padL - padR, plotH = chartH - padT - padB;
+                const barW = Math.min(40, plotW / months.length * 0.6);
+                const gap = (plotW - barW * months.length) / (months.length + 1);
+                let bars = '', labels = '', gridLines = '';
+                const gridCount = 4;
+                for (let i = 0; i <= gridCount; i++) {
+                    const y = padT + plotH - (plotH * i / gridCount);
+                    const val = (maxVal * i / gridCount).toFixed(0);
+                    gridLines += `<line x1="${padL}" y1="${y}" x2="${chartW - padR}" y2="${y}" stroke="rgba(148,163,184,0.1)" stroke-width="1"/>`;
+                    gridLines += `<text x="${padL - 8}" y="${y + 4}" text-anchor="end" fill="#64748b" font-size="10">¥${val}</text>`;
+                }
+                months.forEach((m, i) => {
+                    const x = padL + gap + i * (barW + gap);
+                    const h = maxVal > 0 ? (m.total / maxVal) * plotH : 0;
+                    const y = padT + plotH - h;
+                    const color = m.total >= maxVal * 0.8 ? '#ef4444' : m.total >= maxVal * 0.5 ? '#f97316' : '#14b8a6';
+                    bars += `<rect x="${x}" y="${y}" width="${barW}" height="${h}" rx="3" fill="${color}" opacity="0.85">
+                        <title>${parseInt(m.month)}月: ¥${m.total.toFixed(2)}</title>
+                    </rect>`;
+                    bars += `<text x="${x + barW / 2}" y="${y - 6}" text-anchor="middle" fill="#cbd5e1" font-size="10" font-weight="600">¥${m.total.toFixed(0)}</text>`;
+                    labels += `<text x="${x + barW / 2}" y="${chartH - 10}" text-anchor="middle" fill="#94a3b8" font-size="11">${parseInt(m.month)}月</text>`;
+                });
+                let html = '<div style="background:rgba(30,41,59,0.8);border-radius:12px;border:1px solid rgba(148,163,184,0.1);padding:20px;">';
+                html += '<div style="font-size:14px;font-weight:600;color:#94a3b8;margin-bottom:16px;"><i class="fa fa-line-chart" style="color:#14b8a6;margin-right:6px;"></i>月度消费趋势</div>';
+                html += `<div style="overflow-x:auto;"><svg viewBox="0 0 ${chartW} ${chartH}" style="width:100%;max-width:${chartW}px;height:auto;">`;
+                html += gridLines + bars + labels;
+                html += '</svg></div></div>';
+                el.innerHTML = html;
+            } catch (e) {
+                console.error('加载月度趋势失败:', e);
+                el.innerHTML = '<div class="error-message">加载月度趋势失败</div>';
+            }
+        }
+
+        function renderExpenseStatsBar(data) {
+            const el = document.getElementById('expenseStatsBar');
+            if (!el) return;
+            if (data.categories.length === 0) {
+                el.innerHTML = '<div style="text-align:center;color:#64748b;padding:20px;font-size:14px;">暂无数据</div>';
+                return;
+            }
+            const cx = 120, cy = 120, r = 90, ir = 55;
+            let startAngle = -Math.PI / 2;
+            let paths = '';
+            data.categories.forEach(c => {
+                const color = EXPENSE_COLORS[c.category] || '#64748b';
+                const angle = (c.percentage / 100) * 2 * Math.PI;
+                const endAngle = startAngle + angle;
+                const largeArc = angle > Math.PI ? 1 : 0;
+                const x1 = cx + r * Math.cos(startAngle);
+                const y1 = cy + r * Math.sin(startAngle);
+                const x2 = cx + r * Math.cos(endAngle);
+                const y2 = cy + r * Math.sin(endAngle);
+                const ix1 = cx + ir * Math.cos(endAngle);
+                const iy1 = cy + ir * Math.sin(endAngle);
+                const ix2 = cx + ir * Math.cos(startAngle);
+                const iy2 = cy + ir * Math.sin(startAngle);
+                if (angle > 0.001) {
+                    paths += `<path d="M${x1},${y1} A${r},${r} 0 ${largeArc},1 ${x2},${y2} L${ix1},${iy1} A${ir},${ir} 0 ${largeArc},0 ${ix2},${iy2} Z" fill="${color}" stroke="rgba(15,23,42,0.8)" stroke-width="2">
+                        <title>${c.category}: ¥${c.amount.toFixed(2)} (${c.percentage}%)</title>
+                    </path>`;
+                }
+                startAngle = endAngle;
+            });
+            let legendHtml = '<div style="display:flex;flex-wrap:wrap;gap:12px 24px;margin-top:16px;justify-content:center;">';
+            data.categories.forEach(c => {
+                const color = EXPENSE_COLORS[c.category] || '#64748b';
+                legendHtml += `<div style="display:flex;align-items:center;gap:6px;">
+                    <span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:${color};flex-shrink:0;"></span>
+                    <span style="font-size:12px;color:#cbd5e1;">${c.category}</span>
+                    <span style="font-size:12px;color:${color};font-weight:600;">¥${c.amount.toFixed(2)}</span>
+                    <span style="font-size:11px;color:#94a3b8;">(${c.percentage}%)</span>
+                </div>`;
+            });
+            legendHtml += '</div>';
+            let html = '<div style="background:rgba(30,41,59,0.8);border-radius:12px;border:1px solid rgba(148,163,184,0.1);padding:20px;">';
+            html += '<div style="font-size:14px;font-weight:600;color:#94a3b8;margin-bottom:16px;">分类支出占比</div>';
+            html += `<div style="display:flex;flex-direction:column;align-items:center;">
+                <svg width="240" height="240" viewBox="0 0 240 240" style="filter:drop-shadow(0 4px 12px rgba(0,0,0,0.3));">${paths}
+                    <text x="${cx}" y="${cy - 6}" text-anchor="middle" fill="#e2e8f0" font-size="16" font-weight="700">¥${data.grand_total.toFixed(2)}</text>
+                    <text x="${cx}" y="${cy + 14}" text-anchor="middle" fill="#94a3b8" font-size="11">总支出</text>
+                </svg>
+                ${legendHtml}
+            </div>`;
+            html += '</div>';
+            el.innerHTML = html;
+        }
+
+        function renderExpenseStatsTable(data) {
+            const el = document.getElementById('expenseStatsTable');
+            if (!el) return;
+            if (data.categories.length === 0) {
+                el.innerHTML = '';
+                return;
+            }
+            let html = '<div style="background:rgba(30,41,59,0.8);border-radius:12px;border:1px solid rgba(148,163,184,0.1);overflow:hidden;">';
+            html += '<table style="width:100%;border-collapse:collapse;">';
+            html += '<thead><tr style="background:rgba(15,23,42,0.5);">';
+            html += '<th style="padding:12px 16px;color:#94a3b8;font-size:13px;font-weight:700;text-align:center;border-bottom:1px solid rgba(148,163,184,0.1);width:10%;">序号</th>';
+            html += '<th style="padding:12px 16px;color:#94a3b8;font-size:13px;font-weight:700;text-align:left;border-bottom:1px solid rgba(148,163,184,0.1);width:25%;">分类</th>';
+            html += '<th style="padding:12px 16px;color:#94a3b8;font-size:13px;font-weight:700;text-align:right;border-bottom:1px solid rgba(148,163,184,0.1);width:25%;">金额</th>';
+            html += '<th style="padding:12px 16px;color:#94a3b8;font-size:13px;font-weight:700;text-align:center;border-bottom:1px solid rgba(148,163,184,0.1);width:20%;">占比</th>';
+            html += '<th style="padding:12px 16px;color:#94a3b8;font-size:13px;font-weight:700;text-align:left;border-bottom:1px solid rgba(148,163,184,0.1);width:20%;">可视化</th>';
+            html += '</tr></thead><tbody>';
+            data.categories.forEach((c, i) => {
+                const color = EXPENSE_COLORS[c.category] || '#64748b';
+                const bgColor = i % 2 === 0 ? 'transparent' : 'rgba(148,163,184,0.03)';
+                html += `<tr style="background:${bgColor};transition:background 0.2s;" onmouseover="this.style.background='rgba(96,165,250,0.1)'" onmouseout="this.style.background='${bgColor}'">`;
+                html += `<td style="padding:10px 16px;color:#94a3b8;font-size:13px;text-align:center;border-bottom:1px solid rgba(148,163,184,0.05);">${i + 1}</td>`;
+                html += `<td style="padding:10px 16px;font-size:13px;text-align:left;border-bottom:1px solid rgba(148,163,184,0.05);"><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:${color}22;color:${color};">${c.category}</span></td>`;
+                html += `<td style="padding:10px 16px;color:#22c55e;font-size:13px;text-align:right;border-bottom:1px solid rgba(148,163,184,0.05);font-weight:600;">¥${c.amount.toFixed(2)}</td>`;
+                html += `<td style="padding:10px 16px;color:#cbd5e1;font-size:13px;text-align:center;border-bottom:1px solid rgba(148,163,184,0.05);">${c.percentage}%</td>`;
+                html += `<td style="padding:10px 16px;border-bottom:1px solid rgba(148,163,184,0.05);"><div style="height:8px;background:rgba(148,163,184,0.1);border-radius:4px;overflow:hidden;"><div style="height:100%;width:${c.percentage}%;background:${color};border-radius:4px;"></div></div></td>`;
+                html += '</tr>';
+            });
+            html += '<tr style="background:rgba(20,184,166,0.05);font-weight:700;">';
+            html += '<td colspan="2" style="padding:12px 16px;color:#14b8a6;font-size:14px;text-align:center;border-bottom:1px solid rgba(148,163,184,0.1);">合计</td>';
+            html += `<td style="padding:12px 16px;color:#14b8a6;font-size:14px;text-align:right;border-bottom:1px solid rgba(148,163,184,0.1);">¥${data.grand_total.toFixed(2)}</td>`;
+            html += `<td style="padding:12px 16px;color:#14b8a6;font-size:14px;text-align:center;border-bottom:1px solid rgba(148,163,184,0.1);">100%</td>`;
+            html += '<td style="border-bottom:1px solid rgba(148,163,184,0.1);"></td></tr>';
+            html += '</tbody></table></div>';
+            el.innerHTML = html;
+        }
+
+        // ===== 加班管理模块 =====
+        let overtimeData = [];
+        let overtimeTotal = 0;
+        let overtimeCurrentPage = 1;
+        let overtimePageSize = 5;
+        let overtimeMonthFilter = '';
+        let selectedOvertimeIds = new Set();
+
+        async function loadOvertimeRecords() {
+            try {
+                let url = `${API_URL}/overtime?page=${overtimeCurrentPage}&page_size=${overtimePageSize}`;
+                if (overtimeMonthFilter) url += `&month=${overtimeMonthFilter}`;
+                const response = await fetchWithTimeout(url, { headers: getAuthHeaders() });
+                if (!response.ok) throw new Error('加载失败');
+                const result = await response.json();
+                overtimeData = result.records;
+                overtimeTotal = result.total;
+                document.getElementById('overtimeCount').textContent = overtimeTotal;
+                renderOvertimeTable();
+                renderOvertimePagination();
+                await loadOvertimeStats();
+                const selectAll = document.getElementById('selectAllOvertime');
+                if (selectAll) selectAll.checked = false;
+                updateDeleteSelectedBtn();
+            } catch (error) {
+                console.error('加载加班记录失败:', error);
+                const el = document.getElementById('overtimeTableBody');
+                if (el) el.innerHTML = '<div class="empty-state-card"><i class="fa fa-exclamation-triangle"></i><p>加载失败，请刷新重试</p></div>';
+            }
+        }
+
+        async function loadOvertimeStats() {
+            try {
+                let url = `${API_URL}/overtime/stats`;
+                if (overtimeMonthFilter) url += `?month=${overtimeMonthFilter}`;
+                const response = await fetchWithTimeout(url, { headers: getAuthHeaders() });
+                if (!response.ok) return;
+                const stats = await response.json();
+                const statsEl = document.getElementById('overtimeStats');
+                if (statsEl) {
+                    statsEl.innerHTML = `
+                        <div style="display:flex;gap:16px;flex-wrap:wrap;">
+                            <div style="flex:1;min-width:140px;background:rgba(244,114,182,0.1);border:1px solid rgba(244,114,182,0.2);border-radius:10px;padding:16px;text-align:center;">
+                                <div style="font-size:24px;font-weight:700;color:#f472b6;">${parseFloat(stats.weekday_total).toFixed(1)}</div>
+                                <div style="font-size:12px;color:#94a3b8;margin-top:4px;">平时加班(h)</div>
+                            </div>
+                            <div style="flex:1;min-width:140px;background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.2);border-radius:10px;padding:16px;text-align:center;">
+                                <div style="font-size:24px;font-weight:700;color:#3b82f6;">${parseFloat(stats.weekend_total).toFixed(1)}</div>
+                                <div style="font-size:12px;color:#94a3b8;margin-top:4px;">周末加班(h)</div>
+                            </div>
+                            <div style="flex:1;min-width:140px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.2);border-radius:10px;padding:16px;text-align:center;">
+                                <div style="font-size:24px;font-weight:700;color:#22c55e;">${parseFloat(stats.total_hours).toFixed(1)}</div>
+                                <div style="font-size:12px;color:#94a3b8;margin-top:4px;">总加班(h)</div>
+                            </div>
+                            <div style="flex:1;min-width:140px;background:rgba(168,85,247,0.1);border:1px solid rgba(168,85,247,0.2);border-radius:10px;padding:16px;text-align:center;">
+                                <div style="font-size:24px;font-weight:700;color:#a855f7;">${stats.total_count}</div>
+                                <div style="font-size:12px;color:#94a3b8;margin-top:4px;">记录条数</div>
+                            </div>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                console.error('加载统计失败:', error);
+                const statsEl = document.getElementById('overtimeStats');
+                if (statsEl) statsEl.innerHTML = '<div class="error-message">加载统计失败</div>';
+            }
+        }
+
+        function renderOvertimeTable() {
+            const tbody = document.getElementById('overtimeTableBody');
+            if (!tbody) return;
+            if (overtimeData.length === 0) {
+                tbody.innerHTML = '<div class="empty-state-card"><i class="fa fa-inbox"></i><p>暂无加班记录</p></div>';
+                return;
+            }
+            tbody.innerHTML = overtimeData.map((r, i) => `
+                <div class="data-row" style="display:grid;grid-template-columns:40px 60px 90px 120px 100px 100px 80px 1fr 100px;align-items:center;padding:12px 16px;border-bottom:1px solid rgba(148,163,184,0.1);font-size:13px;">
+                    <div style="display:flex;align-items:center;justify-content:center;"><input type="checkbox" class="overtime-checkbox" data-id="${r.id}" onchange="toggleOvertimeSelect(${r.id})" ${selectedOvertimeIds.has(r.id)?'checked':''} style="cursor:pointer;"></div>
+                    <div style="color:#94a3b8;">${(overtimeCurrentPage - 1) * overtimePageSize + i + 1}</div>
+                    <div>${r.date}</div>
+                    <div><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;${r.overtime_type === 'weekday' ? 'background:rgba(244,114,182,0.15);color:#f472b6;' : 'background:rgba(59,130,246,0.15);color:#3b82f6;'}">${r.overtime_type === 'weekday' ? '平时加班' : '周末加班'}</span></div>
+                    <div style="color:#cbd5e1;">${r.start_time}</div>
+                    <div style="color:#cbd5e1;">${r.end_time}</div>
+                    <div style="color:#60a5fa;font-weight:600;">${parseFloat(r.duration).toFixed(1)}h</div>
+                    <div style="color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${r.remark || ''}">${r.remark || '-'}</div>
+                    <div style="display:flex;gap:6px;justify-content:flex-end;">
+                        <button onclick="editOvertimeRecord(${r.id})" class="action-icon-btn edit" title="编辑"><i class="fa fa-pencil"></i></button>
+                        <button onclick="deleteOvertimeRecord(${r.id})" class="action-icon-btn delete" title="删除"><i class="fa fa-trash"></i></button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function renderOvertimePagination() {
+            const el = document.getElementById('overtimePagination');
+            if (!el) return;
+            const totalPages = Math.ceil(overtimeTotal / overtimePageSize);
+            let html = `<div style="display:flex;align-items:center;gap:8px;margin-right:12px;"><span style="color:#94a3b8;font-size:12px;">每页</span><select onchange="changeOvertimePageSize(this.value)" style="padding:4px 8px;border:1px solid rgba(148,163,184,0.2);border-radius:4px;background:rgba(30,41,59,0.8);color:#cbd5e1;font-size:12px;">`;
+            [5,10,15].forEach(s => {
+                html += `<option value="${s}" ${overtimePageSize===s?'selected':''}>${s}</option>`;
+            });
+            html += `</select><span style="color:#94a3b8;font-size:12px;">条</span></div>`;
+            if (totalPages > 1) {
+                const showPages = 5;
+                let startPage = Math.max(1, overtimeCurrentPage - Math.floor(showPages / 2));
+                let endPage = Math.min(totalPages, startPage + showPages - 1);
+                if (endPage - startPage < showPages - 1) startPage = Math.max(1, endPage - showPages + 1);
+                html += `<button onclick="changeOvertimePage(1)" class="page-btn" ${overtimeCurrentPage===1?'disabled':''}>首页</button>`;
+                html += `<button onclick="changeOvertimePage(${overtimeCurrentPage-1})" class="page-btn" ${overtimeCurrentPage===1?'disabled':''}>上一页</button>`;
+                for (let i = startPage; i <= endPage; i++) {
+                    html += `<button onclick="changeOvertimePage(${i})" class="page-btn ${overtimeCurrentPage===i?'active':''}">${i}</button>`;
+                }
+                html += `<button onclick="changeOvertimePage(${overtimeCurrentPage+1})" class="page-btn" ${overtimeCurrentPage===totalPages?'disabled':''}>下一页</button>`;
+                html += `<button onclick="changeOvertimePage(${totalPages})" class="page-btn" ${overtimeCurrentPage===totalPages?'disabled':''}>末页</button>`;
+            }
+            html += `<span style="color:#94a3b8;font-size:12px;margin-left:12px;">共 ${overtimeTotal} 条，第 ${overtimeCurrentPage}/${totalPages || 1} 页</span>`;
+            el.innerHTML = html;
+        }
+
+        function changeOvertimePageSize(size) {
+            overtimePageSize = parseInt(size);
+            overtimeCurrentPage = 1;
+            loadOvertimeRecords();
+        }
+
+        function changeOvertimePage(page) {
+            const totalPages = Math.ceil(overtimeTotal / overtimePageSize);
+            if (page < 1 || page > totalPages) return;
+            overtimeCurrentPage = page;
+            loadOvertimeRecords();
+        }
+
+        let isManualDuration = false;
+
+        function onOvertimeTypeChange() {
+            isManualDuration = false;
+            const type = _$('overtimeType').value;
+            const startEl = _$('overtimeStartTime');
+            const endEl = _$('overtimeEndTime');
+            if (type === 'weekday') {
+                startEl.removeAttribute('min');
+                startEl.removeAttribute('max');
+                endEl.min = '19:00';
+                endEl.max = '23:59';
+            } else {
+                startEl.min = '08:30';
+                startEl.max = '23:59';
+                endEl.min = '08:30';
+                endEl.max = '23:59';
+            }
+            calcOvertimeDuration();
+        }
+
+        function calcOvertimeDuration() {
+            if (isManualDuration) return;
+            const hint = document.getElementById('overtimeDurationHint');
+            if (hint) hint.textContent = '自动计算';
+            const type = _$('overtimeType').value;
+            const start = _$('overtimeStartTime').value;
+            const end = _$('overtimeEndTime').value;
+            const durationEl = _$('overtimeDuration');
+            if (!end) { durationEl.value = ''; return; }
+            let diffMin;
+            if (type === 'weekday') {
+                const base = new Date('2000-01-01T19:00');
+                const e = new Date('2000-01-01T' + end);
+                diffMin = (e - base) / 60000;
+            } else {
+                if (!start) { durationEl.value = ''; return; }
+                diffMin = (new Date('2000-01-01T' + end) - new Date('2000-01-01T' + start)) / 60000;
+                const s = new Date('2000-01-01T' + start);
+                const e = new Date('2000-01-01T' + end);
+                const ls = new Date('2000-01-01T12:00');
+                const le = new Date('2000-01-01T14:00');
+                if (s < le && e > ls) {
+                    const os = s > ls ? s : ls;
+                    const oe = e < le ? e : le;
+                    diffMin -= (oe - os) / 60000;
+                }
+            }
+            if (diffMin <= 0) { durationEl.value = '时间无效'; return; }
+            durationEl.value = (diffMin / 60).toFixed(1) + ' 小时';
+        }
+
+        function onManualDurationChange() {
+            isManualDuration = true;
+            const hint = document.getElementById('overtimeDurationHint');
+            if (hint) hint.textContent = '手动输入';
+        }
+
+        let overtimeTab = 'records'; // 'records' or 'monthly'
+
+        function showOvertime() {
+            window.scrollTo(0, 0);
+            overtimeCurrentPage = 1;
+            overtimeMonthFilter = '';
+            overtimeTab = 'records';
+            selectedOvertimeIds.clear();
+            const toolbar = document.querySelector('.toolbar');
+            if (toolbar) toolbar.style.display = 'none';
+            updateStatsBarVisibility(true);
+            const now = new Date();
+            const defaultMonth = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+            document.getElementById('articleList').innerHTML = `
+                <div id="overtimeSection" style="padding: 20px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+                        <h2 style="color:#94a3b8;margin:0;font-size:18px;text-align:center;flex:1;font-weight:500;"><i class="fa fa-clock-o" style="color:#f472b6;margin-right:8px;"></i> 加班记录管理</h2>
+                        <div style="margin-left:20px;display:flex;gap:8px;">
+                            <button class="btn btn-secondary" onclick="openOvertimeModal()" style="padding:12px 24px;border:1px solid rgba(148,163,184,0.1);background:rgba(255,255,255,0.05);color:#cbd5e1;border-radius:12px;cursor:pointer;font-size:14px;font-weight:600;transition:all 0.3s ease;">+ 新增记录</button>
+                        </div>
+                    </div>
+                    <div id="overtimeStats" style="margin-bottom:20px;"></div>
+                    <div style="display:flex;gap:0;margin-bottom:20px;border-bottom:1px solid rgba(148,163,184,0.15);">
+                        <button onclick="switchOvertimeTab('records')" id="overtimeTabRecords" style="padding:10px 20px;border:none;background:none;color:#f472b6;font-size:13px;font-weight:600;border-bottom:2px solid #f472b6;cursor:pointer;transition:all 0.2s;">加班记录</button>
+                        <button onclick="switchOvertimeTab('monthly')" id="overtimeTabMonthly" style="padding:10px 20px;border:none;background:none;color:#94a3b8;font-size:13px;font-weight:500;border-bottom:2px solid transparent;cursor:pointer;transition:all 0.2s;">月加班统计</button>
+                    </div>
+                    <div id="overtimeTabContent"></div>
+                </div>
+            `;
+            overtimeMonthFilter = defaultMonth;
+            renderOvertimeRecordsTab();
+        }
+
+        function switchOvertimeTab(tab) {
+            overtimeTab = tab;
+            document.getElementById('overtimeTabRecords').style.color = tab === 'records' ? '#f472b6' : '#94a3b8';
+            document.getElementById('overtimeTabRecords').style.fontWeight = tab === 'records' ? '600' : '500';
+            document.getElementById('overtimeTabRecords').style.borderBottom = tab === 'records' ? '2px solid #f472b6' : '2px solid transparent';
+            document.getElementById('overtimeTabMonthly').style.color = tab === 'monthly' ? '#f472b6' : '#94a3b8';
+            document.getElementById('overtimeTabMonthly').style.fontWeight = tab === 'monthly' ? '600' : '500';
+            document.getElementById('overtimeTabMonthly').style.borderBottom = tab === 'monthly' ? '2px solid #f472b6' : '2px solid transparent';
+            if (tab === 'records') {
+                renderOvertimeRecordsTab();
+            } else {
+                renderOvertimeMonthlyTab();
+            }
+        }
+
+        function renderOvertimeRecordsTab() {
+            const now = new Date();
+            const defaultMonth = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+            if (!overtimeMonthFilter) overtimeMonthFilter = defaultMonth;
+            document.getElementById('overtimeTabContent').innerHTML = `
+                <div id="overtimeRecordsPanel">
+                    <div style="display:flex;align-items:center;margin-bottom:15px;gap:10px;">
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <label style="font-size:12px;color:#94a3b8;">月份：</label>
+                            <input type="month" id="overtimeMonthFilter" value="${overtimeMonthFilter}" onchange="filterOvertimeByMonth()" style="padding:8px 12px;border:1px solid rgba(148,163,184,0.2);border-radius:6px;background:rgba(30,41,59,0.8);color:#cbd5e1;font-size:12px;">
+                        </div>
+                        <button class="btn btn-secondary" onclick="resetOvertimeFilter()" style="padding:8px 16px;font-size:12px;font-weight:500;"><i class="fa fa-refresh"></i> 重置</button>
+                        <button class="btn btn-danger" id="deleteSelectedOvertimeBtn" onclick="deleteSelectedOvertimeRecords()" style="padding:8px 16px;font-size:12px;font-weight:500;display:none;"><i class="fa fa-trash"></i> 删除选中 (<span id="selectedOvertimeCount">0</span>)</button>
+                    </div>
+                    <div style="border:1px solid rgba(148,163,184,0.1);border-radius:10px;overflow:hidden;">
+                        <div style="display:grid;grid-template-columns:40px 60px 90px 120px 100px 100px 80px 1fr 100px;padding:12px 16px;background:rgba(30,41,59,0.6);border-bottom:1px solid rgba(148,163,184,0.15);font-size:12px;color:#94a3b8;font-weight:600;">
+                            <div style="display:flex;align-items:center;justify-content:center;"><input type="checkbox" id="selectAllOvertime" onchange="toggleSelectAllOvertime()" style="cursor:pointer;"></div><div>序号</div><div>日期</div><div>类型</div><div>开始</div><div>结束</div><div>时长</div><div>工作内容</div><div style="text-align:right;">操作</div>
+                        </div>
+                        <div id="overtimeTableBody"></div>
+                    </div>
+                    <div id="overtimePagination" style="display:flex;justify-content:center;align-items:center;gap:6px;margin-top:16px;flex-wrap:wrap;"></div>
+                </div>
+            `;
+            loadOvertimeRecords();
+        }
+
+        function renderOvertimeMonthlyTab() {
+            const now = new Date();
+            const defaultMonth = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+            document.getElementById('overtimeTabContent').innerHTML = `
+                <div id="overtimeMonthlyPanel">
+                    <div style="display:flex;align-items:center;margin-bottom:20px;gap:10px;">
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <label style="font-size:12px;color:#94a3b8;">统计月份：</label>
+                            <input type="month" id="overtimeMonthlyFilter" value="${defaultMonth}" onchange="loadOvertimeMonthlyStats()" style="padding:8px 12px;border:1px solid rgba(148,163,184,0.2);border-radius:6px;background:rgba(30,41,59,0.8);color:#cbd5e1;font-size:12px;">
+                        </div>
+                    </div>
+                    <div id="overtimeMonthlyPeriod" style="margin-bottom:16px;padding:12px 16px;background:rgba(30,41,59,0.4);border:1px solid rgba(148,163,184,0.1);border-radius:8px;color:#94a3b8;font-size:13px;"></div>
+                    <div id="overtimeMonthlyStats"></div>
+                </div>
+            `;
+            loadOvertimeMonthlyStats();
+        }
+
+        async function loadOvertimeMonthlyStats() {
+            const month = document.getElementById('overtimeMonthlyFilter').value;
+            if (!month) return;
+            try {
+                const response = await fetchWithTimeout(`${API_URL}/overtime/stats/monthly?month=${month}`, { headers: getAuthHeaders() });
+                if (!response.ok) return;
+                const stats = await response.json();
+                const periodEl = document.getElementById('overtimeMonthlyPeriod');
+                if (periodEl) {
+                    periodEl.innerHTML = `<i class="fa fa-calendar" style="margin-right:6px;color:#60a5fa;"></i>统计周期：<strong style="color:#cbd5e1;">${stats.period_start}</strong> 至 <strong style="color:#cbd5e1;">${stats.period_end}</strong>（共 ${stats.total_count} 条记录）`;
+                }
+                const statsEl = document.getElementById('overtimeMonthlyStats');
+                if (statsEl) {
+                    statsEl.innerHTML = `
+                        <div style="display:flex;gap:16px;flex-wrap:wrap;">
+                            <div style="flex:1;min-width:140px;background:rgba(244,114,182,0.1);border:1px solid rgba(244,114,182,0.2);border-radius:10px;padding:16px;text-align:center;">
+                                <div style="font-size:24px;font-weight:700;color:#f472b6;">${parseFloat(stats.weekday_total).toFixed(1)}</div>
+                                <div style="font-size:12px;color:#94a3b8;margin-top:4px;">平时加班(h)</div>
+                            </div>
+                            <div style="flex:1;min-width:140px;background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.2);border-radius:10px;padding:16px;text-align:center;">
+                                <div style="font-size:24px;font-weight:700;color:#3b82f6;">${parseFloat(stats.weekend_total).toFixed(1)}</div>
+                                <div style="font-size:12px;color:#94a3b8;margin-top:4px;">周末加班(h)</div>
+                            </div>
+                            <div style="flex:1;min-width:140px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.2);border-radius:10px;padding:16px;text-align:center;">
+                                <div style="font-size:24px;font-weight:700;color:#22c55e;">${parseFloat(stats.total_hours).toFixed(1)}</div>
+                                <div style="font-size:12px;color:#94a3b8;margin-top:4px;">总加班(h)</div>
+                            </div>
+                            <div style="flex:1;min-width:140px;background:rgba(168,85,247,0.1);border:1px solid rgba(168,85,247,0.2);border-radius:10px;padding:16px;text-align:center;">
+                                <div style="font-size:24px;font-weight:700;color:#a855f7;">${stats.total_count}</div>
+                                <div style="font-size:12px;color:#94a3b8;margin-top:4px;">记录条数</div>
+                            </div>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                console.error('加载月度统计失败:', error);
+                const statsEl = document.getElementById('overtimeMonthlyStats');
+                if (statsEl) statsEl.innerHTML = '<div class="error-message">加载月度统计失败</div>';
+            }
+        }
+
+        function filterOvertimeByMonth() {
+            overtimeMonthFilter = document.getElementById('overtimeMonthFilter').value;
+            overtimeCurrentPage = 1;
+            loadOvertimeRecords();
+        }
+
+        function resetOvertimeFilter() {
+            const now = new Date();
+            overtimeMonthFilter = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+            document.getElementById('overtimeMonthFilter').value = overtimeMonthFilter;
+            overtimeCurrentPage = 1;
+            loadOvertimeRecords();
+        }
+
+        function openOvertimeModal(id = null) {
+            isManualDuration = false;
+            document.getElementById('overtimeModal').classList.add('active');
+            document.getElementById('overtimeForm').reset();
+            document.getElementById('overtimeRecordId').value = '';
+            document.getElementById('overtimeModalTitle').textContent = '新增加班记录';
+            _$('overtimeDuration').value = '';
+            document.getElementById('overtimeDurationHint').textContent = '自动计算';
+            onOvertimeTypeChange();
+            if (id) {
+                const r = overtimeData.find(x => x.id === id);
+                if (r) {
+                    document.getElementById('overtimeRecordId').value = r.id;
+                    _$('overtimeType').value = r.overtime_type;
+                    _$('overtimeDate').value = r.date;
+                    _$('overtimeStartTime').value = r.start_time;
+                    _$('overtimeEndTime').value = r.end_time;
+                    _$('overtimeRemark').value = r.remark || '';
+                    document.getElementById('overtimeModalTitle').textContent = '编辑加班记录';
+                    onOvertimeTypeChange();
+                    _$('overtimeDuration').value = parseFloat(r.duration).toFixed(1) + ' 小时';
+                    document.getElementById('overtimeDurationHint').textContent = '可手动修改';
+                }
+            }
+        }
+
+        function closeOvertimeModal() {
+            document.getElementById('overtimeModal').classList.remove('active');
+        }
+
+        async function saveOvertimeRecord(event) {
+            if (window._submitting) return;
+            window._submitting = true;
+            try {
+                event.preventDefault();
+                const id = document.getElementById('overtimeRecordId').value;
+            const durationText = _$('overtimeDuration').value.trim();
+            const data = {
+                overtime_type: _$('overtimeType').value,
+                date: _$('overtimeDate').value,
+                start_time: _$('overtimeStartTime').value,
+                end_time: _$('overtimeEndTime').value,
+                remark: _$('overtimeRemark').value.trim()
+            };
+            const parsed = parseFloat(durationText);
+            if (!isNaN(parsed) && parsed > 0) {
+                data.duration = parsed;
+            }
+            if (!data.date) { alert('请选择日期'); return; }
+            if (!data.start_time) { alert('请填写开始时间'); return; }
+            if (!data.end_time) { alert('请填写结束时间'); return; }
+            if (data.end_time <= data.start_time) {
+                alert('结束时间必须晚于开始时间');
+                return;
+            }
+            try {
+                const url = id ? `${API_URL}/overtime/${id}` : `${API_URL}/overtime`;
+                const method = id ? 'PUT' : 'POST';
+                const response = await fetchWithTimeout(url, {
+                    method,
+                    headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.error || '保存失败');
+                closeOvertimeModal();
+                loadOvertimeRecords();
+                loadOvertimeCount();
+                alert(id ? '更新成功' : '添加成功');
+            } catch (error) {
+                alert(error.message);
+            }
+            } finally {
+                window._submitting = false;
+            }
+        }
+
+        function editOvertimeRecord(id) {
+            openOvertimeModal(id);
+        }
+
+        async function deleteOvertimeRecord(id) {
+            if (!confirm('确定要删除这条加班记录吗？')) return;
+            try {
+                const response = await fetchWithTimeout(`${API_URL}/overtime/${id}`, {
+                    method: 'DELETE',
+                    headers: getAuthHeaders()
+                });
+                if (!response.ok) throw new Error('删除失败');
+                selectedOvertimeIds.delete(id);
+                updateDeleteSelectedBtn();
+                loadOvertimeRecords();
+                loadOvertimeCount();
+                alert('删除成功');
+            } catch (error) {
+                alert(error.message);
+            }
+        }
+
+        function toggleOvertimeSelect(id) {
+            if (selectedOvertimeIds.has(id)) {
+                selectedOvertimeIds.delete(id);
+            } else {
+                selectedOvertimeIds.add(id);
+            }
+            updateDeleteSelectedBtn();
+            const selectAll = document.getElementById('selectAllOvertime');
+            if (selectAll) {
+                selectAll.checked = selectedOvertimeIds.size === overtimeData.length && overtimeData.length > 0;
+            }
+        }
+
+        function toggleSelectAllOvertime() {
+            const checked = document.getElementById('selectAllOvertime').checked;
+            if (checked) {
+                overtimeData.forEach(r => selectedOvertimeIds.add(r.id));
+            } else {
+                overtimeData.forEach(r => selectedOvertimeIds.delete(r.id));
+            }
+            updateDeleteSelectedBtn();
+            renderOvertimeTable();
+        }
+
+        function updateDeleteSelectedBtn() {
+            const btn = document.getElementById('deleteSelectedOvertimeBtn');
+            const countEl = document.getElementById('selectedOvertimeCount');
+            if (btn && countEl) {
+                if (selectedOvertimeIds.size > 0) {
+                    btn.style.display = 'inline-flex';
+                    countEl.textContent = selectedOvertimeIds.size;
+                } else {
+                    btn.style.display = 'none';
+                }
+            }
+        }
+
+        async function deleteSelectedOvertimeRecords() {
+            if (selectedOvertimeIds.size === 0) return;
+            if (!confirm(`确定要删除选中的 ${selectedOvertimeIds.size} 条加班记录吗？`)) return;
+            try {
+                const ids = Array.from(selectedOvertimeIds);
+                const response = await fetchWithTimeout(`${API_URL}/overtime/batch-delete`, {
+                    method: 'POST',
+                    headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids })
+                });
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.error || '删除失败');
+                selectedOvertimeIds.clear();
+                updateDeleteSelectedBtn();
+                loadOvertimeRecords();
+                loadOvertimeCount();
+                alert(result.message);
+            } catch (error) {
+                alert(error.message);
+                selectedOvertimeIds.clear();
+                updateDeleteSelectedBtn();
+                loadOvertimeRecords();
+                loadOvertimeCount();
+            }
+        }
+
+        async function loadCategories() {
+            try {
+                const response = await fetchWithTimeout(`${API_URL}/categories`, {
+                    headers: getAuthHeaders()
+                });
+                
+                if (!response.ok) {
+                    throw new Error('加载分类失败');
+                }
+                
+                const categories = await response.json();
+
+                // 获取总文章数
+                const statsResponse = await fetchWithTimeout(`${API_URL}/stats`, {
+                    headers: getAuthHeaders()
+                });
+                const stats = await statsResponse.json();
+                const catTotalArticles = stats.total_articles || 0;
+
+                const select = _$('articleCategory');
+                select.innerHTML = categories.map(c => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('');
+
+                document.getElementById('categoryList').innerHTML = `
+                    <div class="category-item ${!currentCategory ? 'active' : ''}" onclick="showAll()">
+                        <div class="category-left"><div class="category-dot" style="background:#64748b;"></div><span class="category-name">全部</span></div>
+                        <div class="category-actions">
+                            <span class="category-count">${catTotalArticles}</span>
+                        </div>
+                    </div>
+                ` + categories.map(c => `
+                    <div class="category-item ${currentCategory === c.name ? 'active' : ''}" data-category="${escapeHtml(c.name)}" oncontextmenu="showCategoryContextMenu(event, this.dataset.category)">
+                        <div class="category-left" onclick="filterByCategory(this.closest('.category-item').dataset.category)"><div class="category-dot" style="background:${c.color};"></div><span class="category-name">${escapeHtml(c.name)}</span></div>
+                        <div class="category-actions">
+                            <span class="category-count">${c.article_count || 0}</span>
+                        </div>
+                        <!-- 分类右键菜单 -->
+                        <div id="categoryContextMenu_${escapeHtml(c.name)}" class="category-context-menu" style="
+                            display: none;
+                            position: absolute;
+                            background: rgba(30, 41, 59, 0.95);
+                            border: 1px solid rgba(148, 163, 184, 0.2);
+                            border-radius: 8px;
+                            padding: 0;
+                            z-index: 1000;
+                            min-width: 80px;
+                            max-width: 100px;
+                            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+                            right: 0;
+                            top: 0;
+                            height: 100%;
+                        ">
+                            <div class="context-menu-item" onclick="deleteCategory(this.closest('.category-item').dataset.category)" style="
+                                padding: 0 12px;
+                                cursor: pointer;
+                                transition: background 0.2s ease;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                                gap: 6px;
+                                color: white;
+                                height: 100%;
+                                width: 100%;
+                            ">
+                                <i class="fa fa-trash" style="font-size: 12px; color: white;"></i>
+                                <span style="font-size: 12px;">删除</span>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('加载分类失败:', error);
+                if (error.message === '加载分类失败') {
+                    // 可能是未登录，重新检查认证状态
+                    checkAuth();
+                }
+            }
+        }
+
+        async function loadStats() {
+            try {
+                const response = await fetchWithTimeout(`${API_URL}/stats`, {
+                    headers: getAuthHeaders()
+                });
+                
+                if (!response.ok) {
+                    throw new Error('加载统计数据失败');
+                }
+                
+                const stats = await response.json();
+                document.getElementById('statArticles').textContent = stats.total_articles;
+                document.getElementById('statFavorites').textContent = stats.favorites;
+                document.getElementById('statViews').textContent = stats.total_views;
+            } catch (error) {
+                console.error('加载统计失败:', error);
+                if (error.message === '加载统计数据失败') {
+                    // 可能是未登录，重新检查认证状态
+                    checkAuth();
+                }
+            }
+        }
+
+        function openModal(id) {
+            document.body.style.overflow = 'hidden';
+            editingId = id;
+            document.getElementById('articleModal').classList.add('active');
+            if (id) {
+                // 先显示通用占位，等异步加载到真实分类后再由 loadArticleForEdit 覆盖，避免标题短暂闪烁成错误文案
+                _$('modalTitle').textContent = '编辑中...';
+                loadArticleForEdit(id);
+            } else {
+                _$('modalTitle').textContent = '新增' + articleTerm(currentCategory);
+                _$('articleTitle').placeholder = '输入' + articleTerm(currentCategory) + '标题';
+                document.getElementById('articleForm').reset();
+                document.getElementById('articleId').value = '';
+                setTimeout(() => {
+                    if (easyMDE) easyMDE.toTextArea();
+                    // 配置Marked.js
+                    marked.setOptions({
+                        breaks: true,
+                        gfm: true,
+                        highlight: function(code, lang) {
+                            // 简单的语法高亮
+                            if (!lang) return code;
+                            
+                            // 针对不同语言的高亮
+                            if (lang === 'python') {
+                                code = code
+                                    // 关键字
+                                    .replace(/\b(def|class|import|from|if|elif|else|for|while|try|except|finally|return|print|pass|break|continue|with|as|lambda|and|or|not|in|is|True|False|None)\b/g, '<span style="color: #f472b6;">$1</span>')
+                                    // 字符串
+                                    .replace(/(['"])(?:\\.|[^\\])*?\1/g, '<span style="color: #fbbf24;">$&</span>')
+                                    // 注释
+                                    .replace(/#.*$/gm, '<span style="color: #64748b; font-style: italic;">$&</span>')
+                                    // 数字
+                                    .replace(/\b\d+\b/g, '<span style="color: #34d399;">$&</span>')
+                                    // 函数名
+                                    .replace(/\bdef\s+(\w+)/g, 'def <span style="color: #60a5fa;">$1</span>')
+                                    // 类名
+                                    .replace(/\bclass\s+(\w+)/g, 'class <span style="color: #60a5fa;">$1</span>');
+                            } else if (lang === 'javascript' || lang === 'js') {
+                                code = code
+                                    // 关键字
+                                    .replace(/\b(var|let|const|function|if|else|for|while|do|switch|case|default|break|continue|return|try|catch|finally|throw|new|this|typeof|instanceof|in|of|from|import|export|async|await)\b/g, '<span style="color: #f472b6;">$1</span>')
+                                    // 字符串
+                                    .replace(/(['"])(?:\\.|[^\\])*?\1/g, '<span style="color: #fbbf24;">$&</span>')
+                                    // 注释
+                                    .replace(/\/\/.*$/gm, '<span style="color: #64748b; font-style: italic;">$&</span>')
+                                    .replace(/\/\*[\s\S]*?\*\//g, '<span style="color: #64748b; font-style: italic;">$&</span>')
+                                    // 数字
+                                    .replace(/\b\d+\b/g, '<span style="color: #34d399;">$&</span>')
+                                    // 函数名
+                                    .replace(/\bfunction\s+(\w+)/g, 'function <span style="color: #60a5fa;">$1</span>')
+                                    // 方法调用
+                                    .replace(/(\w+)\s*\(/g, '<span style="color: #60a5fa;">$1</span>(');
+                            } else if (lang === 'html') {
+                                code = code
+                                    // 标签
+                                    .replace(/<(\w+)/g, '<span style="color: #f472b6;">&lt;$1</span>')
+                                    .replace(/<\/(\w+)>/g, '<span style="color: #f472b6;">&lt;/$1&gt;</span>')
+                                    // 属性
+                                    .replace(/(\w+)\s*=/g, '<span style="color: #60a5fa;">$1</span>=')
+                                    // 属性值
+                                    .replace(/=(['"])(?:\\.|[^\\])*?\1/g, '=<span style="color: #fbbf24;">$&</span>')
+                                    // 注释
+                                    .replace(/<!--[\s\S]*?-->/g, '<span style="color: #64748b; font-style: italic;">$&</span>');
+                            } else if (lang === 'css') {
+                                code = code
+                                    // 选择器
+                                    .replace(/([.#]?[\w-]+)\s*\{/g, '<span style="color: #f472b6;">$1</span>{')
+                                    // 属性
+                                    .replace(/(\w+)\s*:/g, '<span style="color: #60a5fa;">$1</span>:')
+                                    // 值
+                                    .replace(/:\s*([^;]+);/g, ': <span style="color: #fbbf24;">$1</span>;')
+                                    // 注释
+                                    .replace(/\/\*[\s\S]*?\*\//g, '<span style="color: #64748b; font-style: italic;">$&</span>');
+                            }
+                            
+                            return code;
+                        },
+                        langPrefix: 'language-'
+                    });
+                    
+                    easyMDE = new EasyMDE({
+                        element: _$('articleContent'),
+                        spellChecker: false,
+                        autosave: {
+                            enabled: false
+                        },
+                        status: [
+                            {
+                                className: 'lines',
+                                defaultValue: function(el) {
+                                    el.innerHTML = '行数: 0';
+                                },
+                                onUpdate: function(el) {
+                                    const text = easyMDE.value();
+                                    const lines = text.split('\n').length;
+                                    el.innerHTML = '行数: ' + lines;
+                                }
+                            },
+                            {
+                                className: 'words',
+                                defaultValue: function(el) {
+                                    el.innerHTML = '字数: 0';
+                                },
+                                onUpdate: function(el) {
+                                    const text = easyMDE.value();
+                                    const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+                                    el.innerHTML = '字数: ' + words;
+                                }
+                            }
+                        ],
+                        toolbar: [
+                            'bold', 'italic', 'heading', '|',
+                            {
+                                name: 'code',
+                                action: function(editor) {
+                                    const languages = ['python', 'javascript', 'java', 'cpp', 'csharp', 'go', 'rust', 'html', 'css', 'json', 'yaml', 'bash', 'sql'];
+                                    let languageOptions = languages.map(lang => `
+                                        <div style="padding: 8px 12px; cursor: pointer; hover: bg-gray-700;" onclick="insertCodeBlock('${lang}')">
+                                            ${lang}
+                                        </div>
+                                    `).join('');
+                                    
+                                    const dropdown = document.createElement('div');
+                                    dropdown.style.cssText = `
+                                        position: absolute;
+                                        background: rgba(30, 41, 59, 0.95);
+                                        border: 1px solid rgba(148, 163, 184, 0.2);
+                                        border-radius: 8px;
+                                        padding: 8px;
+                                        z-index: 1000;
+                                        min-width: 120px;
+                                        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+                                    `;
+                                    dropdown.innerHTML = `
+                                        <div style="font-size: 12px; color: #94a3b8; margin-bottom: 8px; font-weight: 600;">选择语言</div>
+                                        ${languageOptions}
+                                    `;
+                                    
+                                    // 找到当前按钮
+                                    let button = null;
+                                    const toolbarButtons = document.querySelectorAll('.editor-toolbar button');
+                                    toolbarButtons.forEach(btn => {
+                                        if (btn.querySelector('.fa-code')) {
+                                            button = btn;
+                                        }
+                                    });
+                                    
+                                    if (!button) return;
+                                    
+                                    const rect = button.getBoundingClientRect();
+                                    dropdown.style.top = `${rect.bottom + window.scrollY + 8}px`;
+                                    dropdown.style.left = `${rect.left + window.scrollX}px`;
+                                    
+                                    document.body.appendChild(dropdown);
+                                    
+                                    // 关闭下拉菜单的事件监听
+                                    function closeDropdown(e) {
+                                        if (!dropdown.contains(e.target) && e.target !== button) {
+                                            dropdown.remove();
+                                            document.removeEventListener('click', closeDropdown);
+                                        }
+                                    }
+                                    
+                                    setTimeout(() => {
+                                        document.addEventListener('click', closeDropdown);
+                                    }, 100);
+                                },
+                                className: 'fa fa-code',
+                                title: '代码块'
+                            },
+                            'quote', 'unordered-list', 'ordered-list', '|',
+                            'link', 'image', 'table', '|',
+                            'preview', 'side-by-side', 'fullscreen', '|',
+                            'guide'
+                        ],
+                        placeholder: '在这里写下你的内容...',
+                        renderingConfig: {
+                            codeSyntaxHighlighting: true
+                        },
+                        markedOptions: {
+                            breaks: true,
+                            gfm: true,
+                            highlight: function(code, lang) {
+                                // 简单的语法高亮
+                                if (!lang) return code;
+                                
+                                // 针对不同语言的高亮
+                                if (lang === 'python') {
+                                    code = code
+                                        // 关键字
+                                        .replace(/\b(def|class|import|from|if|elif|else|for|while|try|except|finally|return|print|pass|break|continue|with|as|lambda|and|or|not|in|is|True|False|None)\b/g, '<span style="color: #f472b6;">$1</span>')
+                                        // 字符串
+                                        .replace(/(['"])(?:\\.|[^\\])*?\1/g, '<span style="color: #fbbf24;">$&</span>')
+                                        // 注释
+                                        .replace(/#.*$/gm, '<span style="color: #64748b; font-style: italic;">$&</span>')
+                                        // 数字
+                                        .replace(/\b\d+\b/g, '<span style="color: #34d399;">$&</span>')
+                                        // 函数名
+                                        .replace(/\bdef\s+(\w+)/g, 'def <span style="color: #60a5fa;">$1</span>')
+                                        // 类名
+                                        .replace(/\bclass\s+(\w+)/g, 'class <span style="color: #60a5fa;">$1</span>');
+                                } else if (lang === 'javascript' || lang === 'js') {
+                                    code = code
+                                        // 关键字
+                                        .replace(/\b(var|let|const|function|if|else|for|while|do|switch|case|default|break|continue|return|try|catch|finally|throw|new|this|typeof|instanceof|in|of|from|import|export|async|await)\b/g, '<span style="color: #f472b6;">$1</span>')
+                                        // 字符串
+                                        .replace(/(['"])(?:\\.|[^\\])*?\1/g, '<span style="color: #fbbf24;">$&</span>')
+                                        // 注释
+                                        .replace(/\/\/.*$/gm, '<span style="color: #64748b; font-style: italic;">$&</span>')
+                                        .replace(/\/\*[\s\S]*?\*\//g, '<span style="color: #64748b; font-style: italic;">$&</span>')
+                                        // 数字
+                                        .replace(/\b\d+\b/g, '<span style="color: #34d399;">$&</span>')
+                                        // 函数名
+                                        .replace(/\bfunction\s+(\w+)/g, 'function <span style="color: #60a5fa;">$1</span>')
+                                        // 方法调用
+                                        .replace(/(\w+)\s*\(/g, '<span style="color: #60a5fa;">$1</span>(');
+                                } else if (lang === 'html') {
+                                    code = code
+                                        // 标签
+                                        .replace(/<(\w+)/g, '<span style="color: #f472b6;">&lt;$1</span>')
+                                        .replace(/<\/(\w+)>/g, '<span style="color: #f472b6;">&lt;/$1&gt;</span>')
+                                        // 属性
+                                        .replace(/(\w+)\s*=/g, '<span style="color: #60a5fa;">$1</span>=')
+                                        // 属性值
+                                        .replace(/=(['"])(?:\\.|[^\\])*?\1/g, '=<span style="color: #fbbf24;">$&</span>')
+                                        // 注释
+                                        .replace(/<!--[\s\S]*?-->/g, '<span style="color: #64748b; font-style: italic;">$&</span>');
+                                } else if (lang === 'css') {
+                                    code = code
+                                        // 选择器
+                                        .replace(/([.#]?[\w-]+)\s*\{/g, '<span style="color: #f472b6;">$1</span>{')
+                                        // 属性
+                                        .replace(/(\w+)\s*:/g, '<span style="color: #60a5fa;">$1</span>:')
+                                        // 值
+                                        .replace(/:\s*([^;]+);/g, ': <span style="color: #fbbf24;">$1</span>;')
+                                        // 注释
+                                        .replace(/\/\*[\s\S]*?\*\//g, '<span style="color: #64748b; font-style: italic;">$&</span>');
+                                }
+                                
+                                return code;
+                            },
+                            langPrefix: 'language-'  
+                        },
+                        codemirrorOptions: {
+                            lineNumbers: true,
+                            lineWrapping: true,
+                            matchBrackets: true,
+                            autoCloseBrackets: true,
+                            extraKeys: {
+                                'Ctrl-Space': 'autocomplete'
+                            },
+                            // 启用语法高亮
+                            gutters: ['CodeMirror-linenumbers', 'CodeMirror-foldgutter'],
+                            foldGutter: true,
+                            indentUnit: 4,
+                            indentWithTabs: false,
+                            // 确保Python语法高亮正常工作
+                            mode: {
+                                name: 'markdown',
+                                codeBlocks: {
+                                    python: 'python'
+                                }
+                            }
+                        }
+                    });
+                }, 100);
+            }
+            loadCategories();
+        }
+
+        async function loadArticleForEdit(id) {
+            try {
+                const response = await fetchWithTimeout(`${API_URL}/articles/${id}`, {
+                    headers: getAuthHeaders()
+                });
+                
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        // 未授权，重新检查认证状态
+                        checkAuth();
+                    }
+                    throw new Error('加载文章失败');
+                }
+                
+                const article = await response.json();
+                document.getElementById('articleId').value = article.id;
+                _$('articleTitle').value = article.title;
+                _$('articleTitle').placeholder = '输入' + articleTerm(article.category) + '标题';
+                _$('modalTitle').textContent = '编辑' + articleTerm(article.category);
+                _$('articleCategory').value = article.category;
+                _$('articleTags').value = article.tags || '';
+                _$('articleContent').value = article.content;
+                setTimeout(() => {
+                    if (easyMDE) easyMDE.toTextArea();
+                    // 配置Marked.js
+                    marked.setOptions({
+                        breaks: true,
+                        gfm: true,
+                        highlight: function(code, lang) {
+                            // 简单的语法高亮
+                            if (!lang) return code;
+                            
+                            // 针对不同语言的高亮
+                            if (lang === 'python') {
+                                code = code
+                                    // 关键字
+                                    .replace(/\b(def|class|import|from|if|elif|else|for|while|try|except|finally|return|print|pass|break|continue|with|as|lambda|and|or|not|in|is|True|False|None)\b/g, '<span style="color: #f472b6;">$1</span>')
+                                    // 字符串
+                                    .replace(/(['"])(?:\\.|[^\\])*?\1/g, '<span style="color: #fbbf24;">$&</span>')
+                                    // 注释
+                                    .replace(/#.*$/gm, '<span style="color: #64748b; font-style: italic;">$&</span>')
+                                    // 数字
+                                    .replace(/\b\d+\b/g, '<span style="color: #34d399;">$&</span>')
+                                    // 函数名
+                                    .replace(/\bdef\s+(\w+)/g, 'def <span style="color: #60a5fa;">$1</span>')
+                                    // 类名
+                                    .replace(/\bclass\s+(\w+)/g, 'class <span style="color: #60a5fa;">$1</span>');
+                            } else if (lang === 'javascript' || lang === 'js') {
+                                code = code
+                                    // 关键字
+                                    .replace(/\b(var|let|const|function|if|else|for|while|do|switch|case|default|break|continue|return|try|catch|finally|throw|new|this|typeof|instanceof|in|of|from|import|export|async|await)\b/g, '<span style="color: #f472b6;">$1</span>')
+                                    // 字符串
+                                    .replace(/(['"])(?:\\.|[^\\])*?\1/g, '<span style="color: #fbbf24;">$&</span>')
+                                    // 注释
+                                    .replace(/\/\/.*$/gm, '<span style="color: #64748b; font-style: italic;">$&</span>')
+                                    .replace(/\/\*[\s\S]*?\*\//g, '<span style="color: #64748b; font-style: italic;">$&</span>')
+                                    // 数字
+                                    .replace(/\b\d+\b/g, '<span style="color: #34d399;">$&</span>')
+                                    // 函数名
+                                    .replace(/\bfunction\s+(\w+)/g, 'function <span style="color: #60a5fa;">$1</span>')
+                                    // 方法调用
+                                    .replace(/(\w+)\s*\(/g, '<span style="color: #60a5fa;">$1</span>(');
+                            } else if (lang === 'html') {
+                                code = code
+                                    // 标签
+                                    .replace(/<(\w+)/g, '<span style="color: #f472b6;">&lt;$1</span>')
+                                    .replace(/<\/(\w+)>/g, '<span style="color: #f472b6;">&lt;/$1&gt;</span>')
+                                    // 属性
+                                    .replace(/(\w+)\s*=/g, '<span style="color: #60a5fa;">$1</span>=')
+                                    // 属性值
+                                    .replace(/=(['"])(?:\\.|[^\\])*?\1/g, '=<span style="color: #fbbf24;">$&</span>')
+                                    // 注释
+                                    .replace(/<!--[\s\S]*?-->/g, '<span style="color: #64748b; font-style: italic;">$&</span>');
+                            } else if (lang === 'css') {
+                                code = code
+                                    // 选择器
+                                    .replace(/([.#]?[\w-]+)\s*\{/g, '<span style="color: #f472b6;">$1</span>{')
+                                    // 属性
+                                    .replace(/(\w+)\s*:/g, '<span style="color: #60a5fa;">$1</span>:')
+                                    // 值
+                                    .replace(/:\s*([^;]+);/g, ': <span style="color: #fbbf24;">$1</span>;')
+                                    // 注释
+                                    .replace(/\/\*[\s\S]*?\*\//g, '<span style="color: #64748b; font-style: italic;">$&</span>');
+                            }
+                            
+                            return code;
+                        },
+                        langPrefix: 'language-'
+                    });
+                    
+                    easyMDE = new EasyMDE({
+                        element: _$('articleContent'),
+                        spellChecker: false,
+                        autosave: {
+                            enabled: false
+                        },
+                        status: [
+                            {
+                                className: 'lines',
+                                defaultValue: function(el) {
+                                    el.innerHTML = '行数: 0';
+                                },
+                                onUpdate: function(el) {
+                                    const text = easyMDE.value();
+                                    const lines = text.split('\n').length;
+                                    el.innerHTML = '行数: ' + lines;
+                                }
+                            },
+                            {
+                                className: 'words',
+                                defaultValue: function(el) {
+                                    el.innerHTML = '字数: 0';
+                                },
+                                onUpdate: function(el) {
+                                    const text = easyMDE.value();
+                                    const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+                                    el.innerHTML = '字数: ' + words;
+                                }
+                            }
+                        ],
+                        toolbar: [
+                            'bold', 'italic', 'heading', '|',
+                            {
+                                name: 'code',
+                                action: function(editor) {
+                                    const languages = ['python', 'javascript', 'java', 'cpp', 'csharp', 'go', 'rust', 'html', 'css', 'json', 'yaml', 'bash', 'sql'];
+                                    let languageOptions = languages.map(lang => `
+                                        <div style="padding: 8px 12px; cursor: pointer; hover: bg-gray-700;" onclick="insertCodeBlock('${lang}')">
+                                            ${lang}
+                                        </div>
+                                    `).join('');
+                                    
+                                    const dropdown = document.createElement('div');
+                                    dropdown.style.cssText = `
+                                        position: absolute;
+                                        background: rgba(30, 41, 59, 0.95);
+                                        border: 1px solid rgba(148, 163, 184, 0.2);
+                                        border-radius: 8px;
+                                        padding: 8px;
+                                        z-index: 1000;
+                                        min-width: 120px;
+                                        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+                                    `;
+                                    dropdown.innerHTML = `
+                                        <div style="font-size: 12px; color: #94a3b8; margin-bottom: 8px; font-weight: 600;">选择语言</div>
+                                        ${languageOptions}
+                                    `;
+                                    
+                                    // 找到当前按钮
+                                    let button = null;
+                                    const toolbarButtons = document.querySelectorAll('.editor-toolbar button');
+                                    toolbarButtons.forEach(btn => {
+                                        if (btn.querySelector('.fa-code')) {
+                                            button = btn;
+                                        }
+                                    });
+                                    
+                                    if (!button) return;
+                                    
+                                    const rect = button.getBoundingClientRect();
+                                    dropdown.style.top = `${rect.bottom + window.scrollY + 8}px`;
+                                    dropdown.style.left = `${rect.left + window.scrollX}px`;
+                                    
+                                    document.body.appendChild(dropdown);
+                                    
+                                    // 关闭下拉菜单的事件监听
+                                    function closeDropdown(e) {
+                                        if (!dropdown.contains(e.target) && e.target !== button) {
+                                            dropdown.remove();
+                                            document.removeEventListener('click', closeDropdown);
+                                        }
+                                    }
+                                    
+                                    setTimeout(() => {
+                                        document.addEventListener('click', closeDropdown);
+                                    }, 100);
+                                },
+                                className: 'fa fa-code',
+                                title: '代码块'
+                            },
+                            'quote', 'unordered-list', 'ordered-list', '|',
+                            'link', 'image', 'table', '|',
+                            'preview', 'side-by-side', 'fullscreen', '|',
+                            'guide'
+                        ],
+                        placeholder: '在这里写下你的内容...',
+                        renderingConfig: {
+                            codeSyntaxHighlighting: true
+                        },
+                        markedOptions: {
+                            breaks: true,
+                            gfm: true,
+                            highlight: function(code, lang) {
+                                // 简单的语法高亮
+                                if (!lang) return code;
+                                
+                                // 针对不同语言的高亮
+                                if (lang === 'python') {
+                                    code = code
+                                        // 关键字
+                                        .replace(/\b(def|class|import|from|if|elif|else|for|while|try|except|finally|return|print|pass|break|continue|with|as|lambda|and|or|not|in|is|True|False|None)\b/g, '<span style="color: #f472b6;">$1</span>')
+                                        // 字符串
+                                        .replace(/(['"])(?:\\.|[^\\])*?\1/g, '<span style="color: #fbbf24;">$&</span>')
+                                        // 注释
+                                        .replace(/#.*$/gm, '<span style="color: #64748b; font-style: italic;">$&</span>')
+                                        // 数字
+                                        .replace(/\b\d+\b/g, '<span style="color: #34d399;">$&</span>')
+                                        // 函数名
+                                        .replace(/\bdef\s+(\w+)/g, 'def <span style="color: #60a5fa;">$1</span>')
+                                        // 类名
+                                        .replace(/\bclass\s+(\w+)/g, 'class <span style="color: #60a5fa;">$1</span>');
+                                } else if (lang === 'javascript' || lang === 'js') {
+                                    code = code
+                                        // 关键字
+                                        .replace(/\b(var|let|const|function|if|else|for|while|do|switch|case|default|break|continue|return|try|catch|finally|throw|new|this|typeof|instanceof|in|of|from|import|export|async|await)\b/g, '<span style="color: #f472b6;">$1</span>')
+                                        // 字符串
+                                        .replace(/(['"])(?:\\.|[^\\])*?\1/g, '<span style="color: #fbbf24;">$&</span>')
+                                        // 注释
+                                        .replace(/\/\/.*$/gm, '<span style="color: #64748b; font-style: italic;">$&</span>')
+                                        .replace(/\/\*[\s\S]*?\*\//g, '<span style="color: #64748b; font-style: italic;">$&</span>')
+                                        // 数字
+                                        .replace(/\b\d+\b/g, '<span style="color: #34d399;">$&</span>')
+                                        // 函数名
+                                        .replace(/\bfunction\s+(\w+)/g, 'function <span style="color: #60a5fa;">$1</span>')
+                                        // 方法调用
+                                        .replace(/(\w+)\s*\(/g, '<span style="color: #60a5fa;">$1</span>(');
+                                } else if (lang === 'html') {
+                                    code = code
+                                        // 标签
+                                        .replace(/<(\w+)/g, '<span style="color: #f472b6;">&lt;$1</span>')
+                                        .replace(/<\/(\w+)>/g, '<span style="color: #f472b6;">&lt;/$1&gt;</span>')
+                                        // 属性
+                                        .replace(/(\w+)\s*=/g, '<span style="color: #60a5fa;">$1</span>=')
+                                        // 属性值
+                                        .replace(/=(['"])(?:\\.|[^\\])*?\1/g, '=<span style="color: #fbbf24;">$&</span>')
+                                        // 注释
+                                        .replace(/<!--[\s\S]*?-->/g, '<span style="color: #64748b; font-style: italic;">$&</span>');
+                                } else if (lang === 'css') {
+                                    code = code
+                                        // 选择器
+                                        .replace(/([.#]?[\w-]+)\s*\{/g, '<span style="color: #f472b6;">$1</span>{')
+                                        // 属性
+                                        .replace(/(\w+)\s*:/g, '<span style="color: #60a5fa;">$1</span>:')
+                                        // 值
+                                        .replace(/:\s*([^;]+);/g, ': <span style="color: #fbbf24;">$1</span>;')
+                                        // 注释
+                                        .replace(/\/\*[\s\S]*?\*\//g, '<span style="color: #64748b; font-style: italic;">$&</span>');
+                                }
+                                
+                                return code;
+                            },
+                            langPrefix: 'language-'  
+                        },
+                        codemirrorOptions: {
+                            lineNumbers: true,
+                            lineWrapping: true,
+                            matchBrackets: true,
+                            autoCloseBrackets: true,
+                            extraKeys: {
+                                'Ctrl-Space': 'autocomplete'
+                            },
+                            // 启用语法高亮
+                            gutters: ['CodeMirror-linenumbers', 'CodeMirror-foldgutter'],
+                            foldGutter: true,
+                            indentUnit: 4,
+                            indentWithTabs: false,
+                            // 确保Python语法高亮正常工作
+                            mode: {
+                                name: 'markdown',
+                                codeBlocks: {
+                                    python: 'python'
+                                }
+                            }
+                        }
+                    });
+                }, 100);
+            } catch (error) {
+                console.error('加载文章失败:', error);
+                alert('加载' + articleTerm(currentCategory) + '失败，请稍后重试');
+            }
+        }
+
+        function closeModal(modalId) { 
+            document.body.style.overflow = '';
+            if (modalId) {
+                const el = document.getElementById(modalId);
+                if (el) {
+                    el.classList.remove('active');
+                    el.style.display = 'none';
+                }
+            } else {
+                document.getElementById('articleModal').classList.remove('active'); 
+                editingId = null; 
+            }
+            const pwdFields = document.querySelectorAll('#loginModal input[type="password"], #registerModal input[type="password"]');
+            pwdFields.forEach(f => f.value = '');
+        }
+
+        async function saveArticle(event) {
+            if (window._submitting) return;
+            window._submitting = true;
+            try {
+                // 移除event.preventDefault()，因为按钮现在是type="button"
+                console.log('=== saveArticle function called ===');
+                
+                try {
+                // 检查DOM元素是否存在
+                const titleElement = _$('articleTitle');
+                const categoryElement = _$('articleCategory');
+                const tagsElement = _$('articleTags');
+                const contentElement = _$('articleContent');
+                const idElement = document.getElementById('articleId');
+                
+                console.log('DOM elements:', {
+                    titleElement: titleElement ? 'found' : 'not found',
+                    categoryElement: categoryElement ? 'found' : 'not found',
+                    tagsElement: tagsElement ? 'found' : 'not found',
+                    contentElement: contentElement ? 'found' : 'not found',
+                    idElement: idElement ? 'found' : 'not found'
+                });
+                
+                // 检查API_URL
+                console.log('API_URL:', API_URL);
+                
+                // 获取表单数据
+                const article = {
+                    title: titleElement ? titleElement.value.trim() : '',
+                    category: categoryElement ? categoryElement.value : '未分类',
+                    tags: tagsElement ? tagsElement.value.trim() : '',
+                    content: easyMDE ? easyMDE.value() : (contentElement ? contentElement.value.trim() : ''),
+                    is_draft: 0
+                };
+                
+                console.log('Article data:', article);
+                
+                const id = idElement ? idElement.value : '';
+                console.log('Article ID:', id);
+                
+                if (!article.title) {
+                    alert('请输入' + articleTerm(article.category) + '标题');
+                    return;
+                }
+                if (!article.content) {
+                    alert('请填写内容');
+                    return;
+                }
+                
+                // 发送请求
+                console.log('Sending request...');
+                const response = await fetchWithTimeout(id ? `${API_URL}/articles/${id}` : `${API_URL}/articles`, {
+                    method: id ? 'PUT' : 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    body: JSON.stringify(article)
+                });
+                
+                console.log('Response status:', response.status);
+                console.log('Response ok:', response.ok);
+                
+                if (!response.ok) {
+                    throw new Error(`请求失败，状态码: ${response.status}`);
+                }
+                
+                closeModal();
+                if (easyMDE) easyMDE.toTextArea();
+                easyMDE = null;
+                await Promise.all([loadArticles(), loadCategories(), loadStats()]);
+                
+                alert(id ? articleTerm(article.category) + '更新成功！' : articleTerm(article.category) + '保存成功！');
+            } catch (error) {
+                console.error('保存文章失败:', error);
+                alert('保存失败，请稍后重试');
+                if (error.message.includes('401')) {
+                    // 未授权，重新检查认证状态
+                    checkAuth();
+                }
+            }
+            } finally {
+                window._submitting = false;
+            }
+        }
+
+        async function saveDraft() {
+            if (window._submitting) return;
+            window._submitting = true;
+            try {
+                console.log('=== saveDraft function called ===');
+                
+                try {
+                // 检查DOM元素是否存在
+                const titleElement = _$('articleTitle');
+                const categoryElement = _$('articleCategory');
+                const tagsElement = _$('articleTags');
+                const contentElement = _$('articleContent');
+                const idElement = document.getElementById('articleId');
+                
+                console.log('DOM elements:', {
+                    titleElement: titleElement ? 'found' : 'not found',
+                    categoryElement: categoryElement ? 'found' : 'not found',
+                    tagsElement: tagsElement ? 'found' : 'not found',
+                    contentElement: contentElement ? 'found' : 'not found',
+                    idElement: idElement ? 'found' : 'not found'
+                });
+                
+                // 检查API_URL
+                console.log('API_URL:', API_URL);
+                
+                // 获取表单数据
+                const article = {
+                    title: titleElement ? (titleElement.value.trim() || '无标题') : '无标题',
+                    category: categoryElement ? categoryElement.value : '未分类',
+                    tags: tagsElement ? tagsElement.value.trim() : '',
+                    content: easyMDE ? easyMDE.value() : (contentElement ? contentElement.value.trim() : ''),
+                    is_draft: 1
+                };
+                
+                console.log('Draft data:', article);
+                
+                const id = idElement ? idElement.value : '';
+                console.log('Article ID:', id);
+                
+                // 发送请求
+                console.log('Sending request...');
+                const response = await fetchWithTimeout(id ? `${API_URL}/articles/${id}` : `${API_URL}/articles`, {
+                    method: id ? 'PUT' : 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    body: JSON.stringify(article)
+                });
+                
+                console.log('Response status:', response.status);
+                console.log('Response ok:', response.ok);
+                
+                if (!response.ok) {
+                    throw new Error(`请求失败，状态码: ${response.status}`);
+                }
+                
+                alert('草稿保存成功！');
+                
+                closeModal();
+                
+                await await Promise.all([loadArticles(), loadCategories(), loadStats()]);
+            } catch (error) {
+                console.error('保存草稿失败:', error);
+                alert('保存草稿失败，请稍后重试');
+                if (error.message.includes('401')) {
+                    // 未授权，重新检查认证状态
+                    checkAuth();
+                }
+            }
+            } finally {
+                window._submitting = false;
+            }
+        }
+
+        async function deleteArticle(id, event) {
+            if (event) event.stopPropagation();
+            const cached = renderedArticlesCache.find(a => String(a.id) === String(id));
+            const category = cached ? cached.category : currentCategory;
+            if (!confirm('确定要删除这篇' + articleTerm(category) + '吗？')) return;
+            try {
+                const response = await fetchWithTimeout(`${API_URL}/articles/${id}`, {
+                    method: 'DELETE',
+                    headers: getAuthHeaders()
+                });
+
+                if (!response.ok) {
+                    throw new Error('删除文章失败');
+                }
+
+                if (renderedArticlesCache.length === 1 && currentPage > 1) {
+                    currentPage--;
+                }
+
+                await await Promise.all([loadArticles(), loadCategories(), loadStats()]);
+
+                // 清除选中状态，隐藏删除按钮
+                const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+                if (selectAllCheckbox) selectAllCheckbox.checked = false;
+                const checkboxes = document.querySelectorAll('.article-checkbox');
+                checkboxes.forEach(cb => cb.checked = false);
+                updateSelectedCount();
+
+                alert(articleTerm(category) + '删除成功！');
+            } catch (error) {
+                console.error('删除文章失败:', error);
+                alert('删除失败，请稍后重试');
+            }
+        }
+
+        function toggleSelectAll(checkbox) {
+            const checkboxes = document.querySelectorAll('.article-checkbox');
+            checkboxes.forEach(cb => {
+                cb.checked = checkbox.checked;
+            });
+            updateSelectedCount();
+        }
+
+        function updateSelectedCount() {
+            const checkedBoxes = document.querySelectorAll('.article-checkbox:checked');
+            const count = checkedBoxes.length;
+            const deleteBtn = document.getElementById('deleteSelectedBtn');
+            
+            if (count > 0) {
+                deleteBtn.style.display = 'inline-block';
+                deleteBtn.textContent = `删除选中 (${count})`;
+            } else {
+                deleteBtn.style.display = 'none';
+            }
+        }
+
+        async function deleteSelectedArticles() {
+            const checkedBoxes = document.querySelectorAll('.article-checkbox:checked');
+            const articleIds = Array.from(checkedBoxes).map(cb => parseInt(cb.value));
+            
+            if (articleIds.length === 0) {
+                alert('请先选择要删除的' + articleTerm(currentCategory));
+                return;
+            }
+
+            if (!confirm(`确定要删除这 ${articleIds.length} 篇${articleTerm(currentCategory)}吗？`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetchWithTimeout(`${API_URL}/articles/batch-delete`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    body: JSON.stringify({ ids: articleIds })
+                });
+                const result = await response.json();
+                
+                if (response.ok) {
+                    if (renderedArticlesCache.length === articleIds.length && currentPage > 1) {
+                        currentPage--;
+                    }
+                    await await Promise.all([loadArticles(), loadCategories(), loadStats()]);
+                    
+                    // 清除选中状态，隐藏删除按钮
+                    const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+                    if (selectAllCheckbox) selectAllCheckbox.checked = false;
+                    const checkboxes = document.querySelectorAll('.article-checkbox');
+                    checkboxes.forEach(cb => cb.checked = false);
+                    updateSelectedCount();
+                    
+                    alert(`成功删除 ${result.deleted} 篇${articleTerm(currentCategory)}！`);
+                } else {
+                    throw new Error(result.error || '删除文章失败');
+                }
+            } catch (error) {
+                console.error('删除文章失败:', error);
+                alert('删除失败，请稍后重试');
+                checkAuth();
+            }
+        }
+
+        function insertImage() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'image/*';
+            input.onchange = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const formData = new FormData();
+                formData.append('file', file);
+                try {
+                    const headers = getAuthHeaders();
+                    // 移除Content-Type，让浏览器自动设置
+                    delete headers['Content-Type'];
+                    
+                    const response = await fetchWithTimeout(`${API_URL}/upload`, {
+                        method: 'POST',
+                        headers: headers,
+                        body: formData
+                    });
+                    const result = await response.json();
+                    if (result.url) {
+                        const imageMarkdown = `![${file.name}](${result.url})`;
+                        if (easyMDE) {
+                            easyMDE.value(easyMDE.value() + imageMarkdown);
+                        } else {
+                            _$('articleContent').value += imageMarkdown;
+                        }
+                    }
+                } catch (error) {
+                    console.error('上传图片失败:', error);
+                    alert('上传图片失败，请稍后重试');
+                }
+            };
+            input.click();
+        }
+
+        function insertLink() {
+            const url = prompt('请输入链接地址:');
+            if (!url) return;
+            const text = prompt('请输入链接文本:') || url;
+            const linkMarkdown = `[${text}](${url})`;
+            if (easyMDE) {
+                easyMDE.value(easyMDE.value() + linkMarkdown);
+            } else {
+                _$('articleContent').value += linkMarkdown;
+            }
+        }
+
+        function insertCodeBlock(language) {
+            const codeBlock = `\n\`\`\`${language}\n你的代码在这里\n\`\`\`\n`;
+            if (easyMDE) {
+                const currentValue = easyMDE.value();
+                const cursorPosition = easyMDE.codemirror.getCursor();
+                
+                // 在光标位置插入代码块
+                const newValue = currentValue.substring(0, easyMDE.codemirror.indexFromPos(cursorPosition)) + 
+                               codeBlock + 
+                               currentValue.substring(easyMDE.codemirror.indexFromPos(cursorPosition));
+                
+                easyMDE.value(newValue);
+                easyMDE.codemirror.focus();
+                
+                // 计算新的光标位置
+                const lines = codeBlock.split('\n');
+                const newLine = cursorPosition.line + 1; // 代码块第一行后的位置
+                const newCh = 4; // 缩进位置
+                
+                easyMDE.codemirror.setCursor({line: newLine, ch: newCh});
+            } else {
+                _$('articleContent').value += codeBlock;
+            }
+        }
+
+        function openCategoryModal() {
+            document.getElementById('categoryModal').classList.add('active');
+            document.getElementById('categoryForm').reset();
+            document.getElementById('categoryColor').value = '#60a5fa';
+        }
+
+        function closeCategoryModal() {
+            document.getElementById('categoryModal').classList.remove('active');
+            document.getElementById('categoryForm').reset();
+        }
+
+        async function saveCategory(event) {
+            if (window._submitting) return;
+            window._submitting = true;
+            try {
+                event.preventDefault();
+                const name = document.getElementById('categoryName').value.trim();
+            if (!name) { alert('请输入分类名称'); return; }
+            const category = {
+                name: name,
+                color: document.getElementById('categoryColor').value
+            };
+            try {
+                const response = await fetchWithTimeout(`${API_URL}/categories`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    body: JSON.stringify(category)
+                });
+                
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        // 未授权，重新检查认证状态
+                        checkAuth();
+                    }
+                    throw new Error('保存分类失败');
+                }
+                
+                closeCategoryModal();
+                loadCategories();
+                alert('分类保存成功！');
+            } catch (error) {
+            console.error('保存分类失败:', error);
+            alert('保存分类失败，请稍后重试');
+        }
+        } finally {
+            window._submitting = false;
+        }
+    }
+
+    // 删除分类
+    async function deleteCategory(categoryName) {
+        if (!confirm(`确定要删除分类 "${categoryName}" 吗？`)) {
+            return;
+        }
+        
+        try {
+            // 确保分类名称是字符串类型
+            const categoryNameStr = String(categoryName);
+            const response = await fetchWithTimeout(`${API_URL}/categories/${encodeURIComponent(categoryNameStr)}`, {
+                method: 'DELETE',
+                headers: getAuthHeaders()
+            });
+            
+            if (!response.ok) {
+                if (response.status === 401) {
+                    // 未授权，重新检查认证状态
+                    checkAuth();
+                }
+                throw new Error('删除分类失败');
+            }
+            
+            await response.json();
+            alert('分类删除成功！');
+            await loadCategories();
+        } catch (error) {
+            console.error('删除分类失败:', error);
+            alert('删除分类失败，请稍后重试');
+        }
+    }
+
+    // 文章右键菜单相关函数
+
+        // 关闭分类右键菜单
+        function closeCategoryContextMenu() {
+            document.querySelectorAll('.category-context-menu').forEach(m => m.style.display = 'none');
+        }
+        
+        // 显示分类右键菜单
+        function showCategoryContextMenu(event, categoryName) {
+            event.preventDefault();
+            
+            // 先关闭所有分类右键菜单
+            document.querySelectorAll('.category-context-menu').forEach(menu => {
+                menu.style.display = 'none';
+            });
+            
+            // 显示当前分类的右键菜单
+            const menu = document.getElementById(`categoryContextMenu_${categoryName}`);
+            if (menu) {
+                menu.style.display = 'block';
+            }
+            
+            // 阻止事件冒泡
+            event.stopPropagation();
+        }
+        
+        // 点击空白处关闭所有分类右键菜单
+        document.addEventListener('click', function() {
+            document.querySelectorAll('.category-context-menu').forEach(menu => {
+                menu.style.display = 'none';
+            });
+        });
+
+        function editArticle(id) {
+            if (!id) return;
+            
+            openModal(id);
+        }
+
+        // viewArticle函数
+        function viewArticle(id) {
+            console.log('=== viewArticle function called ===');
+            console.log('Article ID:', id);
+            
+            // 确保 Marked.js 已加载
+            if (typeof marked === 'undefined') {
+                console.log('Marked.js not loaded, loading now...');
+                const script = document.createElement('script');
+                script.src = 'https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js';
+                script.onload = function() {
+                    console.log('Marked.js loaded successfully');
+                    renderArticle(id);
+                };
+                script.onerror = function() {
+                    console.error('Failed to load Marked.js');
+                    document.getElementById('articleList').innerHTML = '<div style="text-align: center; padding: 40px; color: red;">加载 Markdown 解析器失败</div>';
+                };
+                document.head.appendChild(script);
+            } else {
+                renderArticle(id);
+            }
+            
+            function renderArticle(id) {
+                // 简化 Marked.js 配置，先确保 Markdown 格式能正确解析
+                marked.setOptions({
+                    breaks: true,
+                    gfm: true
+                });
+            
+            const articleList = _$('articleList');
+            if (!articleList) {
+                console.error('articleList not found');
+                return;
+            }
+            
+            // 显示加载状态
+            articleList.innerHTML = '<div style="text-align: center; padding: 40px;">加载中...</div>';
+            
+            // 直接获取文章数据
+            fetchWithTimeout(`${API_URL}/articles/${id}`, {
+                headers: getAuthHeaders()
+            })
+                .then(response => {
+                    console.log('Response status:', response.status);
+                    if (!response.ok) {
+                        throw new Error(`请求失败，状态码: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('Article data:', data);
+                    
+                    // 显示文章
+                    articleList.innerHTML = `
+                        <div style="background: rgba(30, 41, 59, 0.6); border: 1px solid rgba(148, 163, 184, 0.1); border-radius:20px;padding:36px;backdrop-filter: blur(10px);">
+                            <button class="btn btn-secondary" onclick="loadArticles(); loadStats();" style="margin-bottom:24px;">← 返回列表</button>
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom:18px;">
+                                <h1 style="font-size:32px;color:#f8fafc;margin:0;">${escapeHtml(data.title)}</h1>
+                                <div style="display:flex;gap:12px;">
+                                    <button class="btn btn-secondary" onclick="navigateArticle(${data.id}, 'prev')"><i class="fa fa-arrow-left"></i> 上一篇</button>
+                                    <button class="btn btn-secondary" onclick="navigateArticle(${data.id}, 'next')">下一篇 <i class="fa fa-arrow-right"></i></button>
+                                </div>
+                            </div>
+                            <div class="article-content" style="color:#cbd5e1;line-height:1.9;margin-bottom:36px;max-height:600px;overflow-y:auto;">
+                                <!-- 内容将通过 JavaScript 插入 -->
+                            </div>
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom:24px;">
+                                <div class="article-meta">
+                                    <span class="article-category" style="background:#60a5fa;padding:4px 12px;border-radius:12px;font-size:12px;margin-right:12px;">${escapeHtml(data.category)}</span>
+                                    <span style="color:#94a3b8;font-size:14px;margin-right:16px;">${new Date(data.updated_at).toLocaleString('zh-CN')}</span>
+                                    <span style="color:#94a3b8;font-size:14px;"><i class="fa fa-eye"></i> ${data.views}</span>
+                                </div>
+                                <div style="display:flex;gap:12px;">
+                                    <button class="btn btn-secondary" onclick="editArticle(${data.id})"><i class="fa fa-pencil"></i> 编辑</button>
+                                    <button class="btn btn-secondary" onclick="toggleFavorite(${data.id}, event)"><i class="fa ${data.is_favorite ? 'fa-star' : 'fa-star-o'}"></i> ${data.is_favorite ? '取消收藏' : '收藏'}</button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    
+                    // 插入解析后的 Markdown 内容
+                    const articleContent = articleList.querySelector('.article-content');
+                    
+                    // 解析 Markdown 内容
+                    try {
+                        // 清空 articleContent
+                        articleContent.innerHTML = '';
+                        
+                        // 获取文章内容
+                        let content = data.content;
+                        
+                        // 先处理代码块，将其替换为占位符
+                        const codeBlocks = [];
+                        let contentWithPlaceholders = content.replace(/```(\w+)?\n([\s\S]*?)\n```/g, function(match, lang, code) {
+                            const index = codeBlocks.length;
+                            codeBlocks.push({ lang: lang || 'plain', code: code });
+                            return `__CODE_BLOCK_${index}__`;
+                        });
+                        
+                        // 处理 Markdown 标题
+                        contentWithPlaceholders = contentWithPlaceholders.replace(/^(#{1,6})\s+(.+)$/gm, function(match, hashes, text) {
+                            const level = hashes.length;
+                            return `<h${level} style="color: #f8fafc; margin-top: 24px; margin-bottom: 12px;">${escapeHtml(text)}</h${level}>`;
+                        });
+                        
+                        // 处理 Markdown 链接
+                        contentWithPlaceholders = contentWithPlaceholders.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(match, linkText, url) {
+                            url = url.replace(/javascript:/gi, '');
+                            return '<a href="' + escapeHtml(url) + '" target="_blank" style="color: #3b82f6; text-decoration: underline; display: inline; cursor: pointer; position: relative; z-index: 100;">' + escapeHtml(linkText) + '</a>';
+                        });
+                        
+                        // 添加链接点击事件处理
+                        setTimeout(() => {
+                            const links = articleContent.querySelectorAll('a');
+                            links.forEach(link => {
+                                link.addEventListener('click', function(e) {
+                                    e.preventDefault();
+                                    window.open(this.href, '_blank');
+                                });
+                            });
+                        }, 100);
+                        
+                        // 处理换行
+                        contentWithPlaceholders = contentWithPlaceholders.replace(/\n/g, '<br>');
+                        
+                        // 替换代码块占位符
+                        for (let i = 0; i < codeBlocks.length; i++) {
+                            const { lang, code } = codeBlocks[i];
+                            const codeHTML = `<div class="code-block-container">
+                                <div class="code-block-header">
+                                    <span class="code-language">${escapeHtml(lang)}</span>
+                                </div>
+                                <pre class="code-block"><code class="language-${lang}">${escapeHtml(code)}</code></pre>
+                            </div>`;
+                            contentWithPlaceholders = contentWithPlaceholders.replace(`__CODE_BLOCK_${i}__`, codeHTML);
+                        }
+                        
+                        // 设置内容
+                        articleContent.innerHTML = contentWithPlaceholders;
+                        
+                        // 确保 highlight.js 加载完成后再执行高亮，并打印调试信息
+                        if (typeof hljs !== 'undefined') {
+                            // 等待 DOM 更新完成
+                            setTimeout(() => {
+                                document.querySelectorAll('pre code').forEach((block) => {
+                                    try {
+                                        // 尝试检测语言是否被注册
+                                        const cls = Array.from(block.classList).find(c => c.startsWith('language-')) || '';
+                                        const lang = cls.replace('language-', '') || null;
+                                        if (lang && hljs.getLanguage && !hljs.getLanguage(lang)) {
+                                            console.warn('highlight.js: language not registered:', lang);
+                                        }
+                                        hljs.highlightElement(block);
+                                        console.log('highlighted block:', { classList: block.className, htmlSample: block.innerHTML.slice(0,200) });
+                                    } catch (e) {
+                                        console.error('highlight error', e);
+                                    }
+                                });
+                                // 保险起见再触发一次 highlightAll
+                                if (typeof hljs.highlightAll === 'function') {
+                                    try { hljs.highlightAll(); } catch (e) { console.error('hljs.highlightAll error', e); }
+                                }
+                            }, 100);
+                        }
+                    } catch (error) {
+                        console.error('Error parsing markdown:', error);
+                        articleContent.textContent = data.content;
+                    }
+                    
+
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    articleList.innerHTML = `<div style="text-align: center; padding: 40px; color: red;">错误: ${escapeHtml(error.message)}</div>`;
+                    if (error.message.includes('401')) {
+                        // 未授权，重新检查认证状态
+                        checkAuth();
+                    }
+                });
+            }
+        }
+    

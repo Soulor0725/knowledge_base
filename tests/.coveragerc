@@ -1,0 +1,17 @@
+[run]
+source = ..
+branch = True
+omit =
+    tests/*
+    scripts/*
+    */__pycache__/*
+    Test_Team/*
+
+[report]
+fail_under = 70
+show_missing = True
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.
+    raise NotImplementedError
+    pass

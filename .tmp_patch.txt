@@ -1,0 +1,9 @@
+﻿*** Begin Patch
+*** Update File: app.py
+@@ -1105,6 +1105,8 @@
+         'status': status,
+     }
++@app.route('/api/kiwi-sales', methods=['GET'])
++@login_required
+ def get_kiwi_sales():
+*** End Patch

@@ -1,0 +1,935 @@
+"""
+生成接口测试用例 Excel
+格式：接口测试 - 主模块 - 接口 - 用例
+"""
+import os
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
+
+OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Test_Case')
+OUT_FILE = os.path.join(OUT_DIR, '接口测试用例_v2.2.0.xlsx')
+
+# 样式
+HEADER_FILL = PatternFill('solid', fgColor='1F4E78')
+HEADER_FONT = Font(name='微软雅黑', size=11, bold=True, color='FFFFFF')
+MODULE_FILL = PatternFill('solid', fgColor='D9E1F2')
+MODULE_FONT = Font(name='微软雅黑', size=11, bold=True, color='1F4E78')
+API_FILL = PatternFill('solid', fgColor='E7E6E6')
+API_FONT = Font(name='微软雅黑', size=10, bold=True, color='333333')
+CELL_FONT = Font(name='微软雅黑', size=10)
+MONO_FONT = Font(name='Consolas', size=10)
+CENTER = Alignment(horizontal='center', vertical='center', wrap_text=True)
+LEFT = Alignment(horizontal='left', vertical='center', wrap_text=True)
+THIN = Side(border_style='thin', color='BFBFBF')
+BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+
+P0_FILL = PatternFill('solid', fgColor='FCE4EC')
+P1_FILL = PatternFill('solid', fgColor='FFF3E0')
+P2_FILL = PatternFill('solid', fgColor='E8F5E9')
+
+# 列定义
+COLUMNS = ['用例ID', '主模块', '接口', '请求方法', '请求路径', '用例标题', '优先级', '类型',
+           '请求头', '请求体', '预期状态码', '预期响应']
+
+# 测试数据：(主模块, 接口, 用例ID, 方法, 路径, 标题, 优先级, 类型, 请求头, 请求体, 预期状态码, 预期响应)
+CASES = [
+    # ============ 认证模块 ============
+    ('用户认证', 'POST /api/auth/register', 'TC-API-AUTH-001', 'POST', '/api/auth/register', '注册-正常流程', 'P0', '正向',
+     'Content-Type: application/json',
+     '{"username":"newuser","password":"pass123","name":"新用户"}',
+     '201', '返回 id/message/token/name'),
+    ('用户认证', 'POST /api/auth/register', 'TC-API-AUTH-002', 'POST', '/api/auth/register', '注册-用户名过短', 'P0', '反向',
+     'Content-Type: application/json',
+     '{"username":"ab","password":"pass123","name":"x"}',
+     '400', '用户名至少3个字符，密码至少6个字符'),
+    ('用户认证', 'POST /api/auth/register', 'TC-API-AUTH-003', 'POST', '/api/auth/register', '注册-密码过短', 'P0', '反向',
+     'Content-Type: application/json',
+     '{"username":"validuser","password":"123","name":"x"}',
+     '400', '密码至少6个字符'),
+    ('用户认证', 'POST /api/auth/register', 'TC-API-AUTH-004', 'POST', '/api/auth/register', '注册-用户名重复', 'P0', '反向',
+     'Content-Type: application/json',
+     '{"username":"root","password":"root123","name":"重复"}',
+     '400', '用户名已存在'),
+    ('用户认证', 'POST /api/auth/register', 'TC-API-AUTH-005', 'POST', '/api/auth/register', '注册-缺字段', 'P1', '边界',
+     'Content-Type: application/json',
+     '{"username":"onlyuser"}',
+     '400', '提示密码或名字缺失'),
+    ('用户认证', 'POST /api/auth/register', 'TC-API-AUTH-006', 'POST', '/api/auth/register', '注册-空body', 'P1', '边界',
+     'Content-Type: application/json',
+     '{}',
+     '400', '字段缺失错误'),
+    ('用户认证', 'POST /api/auth/register', 'TC-API-AUTH-007', 'POST', '/api/auth/register', '注册-非JSON body', 'P1', '边界',
+     'Content-Type: application/json',
+     'plain text',
+     '400', '解析失败'),
+    ('用户认证', 'POST /api/auth/register', 'TC-API-AUTH-008', 'POST', '/api/auth/register', '注册-用户名3字符下限', 'P1', '边界',
+     'Content-Type: application/json',
+     '{"username":"abc","password":"pass123","name":"边界"}',
+     '201', '下限通过'),
+    ('用户认证', 'POST /api/auth/register', 'TC-API-AUTH-009', 'POST', '/api/auth/register', '注册-密码6字符下限', 'P1', '边界',
+     'Content-Type: application/json',
+     '{"username":"edge_user","password":"123456","name":"边界"}',
+     '201', '下限通过'),
+
+    ('用户认证', 'POST /api/auth/login', 'TC-API-AUTH-010', 'POST', '/api/auth/login', '登录-正常流程', 'P0', '正向',
+     'Content-Type: application/json',
+     '{"username":"root","password":"root123"}',
+     '200', '返回 token/username/name/id/avatar'),
+    ('用户认证', 'POST /api/auth/login', 'TC-API-AUTH-011', 'POST', '/api/auth/login', '登录-错误密码', 'P0', '反向',
+     'Content-Type: application/json',
+     '{"username":"root","password":"wrongpwd"}',
+     '401', '用户名或密码错误'),
+    ('用户认证', 'POST /api/auth/login', 'TC-API-AUTH-012', 'POST', '/api/auth/login', '登录-不存在用户', 'P0', '反向',
+     'Content-Type: application/json',
+     '{"username":"nouser","password":"x"}',
+     '401', '用户名或密码错误'),
+    ('用户认证', 'POST /api/auth/login', 'TC-API-AUTH-013', 'POST', '/api/auth/login', '登录-空密码', 'P1', '边界',
+     'Content-Type: application/json',
+     '{"username":"root","password":""}',
+     '400', '用户名和密码不能为空'),
+    ('用户认证', 'POST /api/auth/login', 'TC-API-AUTH-014', 'POST', '/api/auth/login', '登录-缺密码字段', 'P1', '边界',
+     'Content-Type: application/json',
+     '{"username":"root"}',
+     '400', '字段缺失错误'),
+    ('用户认证', 'POST /api/auth/login', 'TC-API-AUTH-015', 'POST', '/api/auth/login', '登录-空用户名', 'P1', '边界',
+     'Content-Type: application/json',
+     '{"username":"","password":"pass"}',
+     '400', '用户名和密码不能为空'),
+    ('用户认证', 'POST /api/auth/login', 'TC-API-AUTH-016', 'POST', '/api/auth/login', '登录-非JSON body', 'P1', '边界',
+     'Content-Type: application/json',
+     'plain text',
+     '400', '解析失败'),
+    ('用户认证', 'POST /api/auth/login', 'TC-API-AUTH-017', 'POST', '/api/auth/login', '登录-token可用性验证', 'P0', '正向',
+     'Content-Type: application/json',
+     '登录后用token调GET /api/auth/me',
+     '200', 'token 有效，返回用户信息'),
+
+    ('用户认证', 'GET/PUT /api/auth/me', 'TC-API-AUTH-018', 'GET', '/api/auth/me', '获取用户-有效token', 'P0', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '返回 id/username/name/avatar/created_at'),
+    ('用户认证', 'GET/PUT /api/auth/me', 'TC-API-AUTH-019', 'GET', '/api/auth/me', '获取用户-无Authorization', 'P0', '安全',
+     '-',
+     '-',
+     '401', '未提供认证token'),
+    ('用户认证', 'GET/PUT /api/auth/me', 'TC-API-AUTH-020', 'GET', '/api/auth/me', '获取用户-错误token', 'P0', '安全',
+     'Authorization: Bearer fake.token.here',
+     '-',
+     '401', '无效或过期的token'),
+    ('用户认证', 'GET/PUT /api/auth/me', 'TC-API-AUTH-021', 'GET', '/api/auth/me', '获取用户-伪造签名', 'P0', '安全',
+     'Authorization: Bearer {错误密钥签发的JWT}',
+     '-',
+     '401', 'token 验证失败'),
+    ('用户认证', 'GET/PUT /api/auth/me', 'TC-API-AUTH-022', 'GET', '/api/auth/me', '获取用户-过期token', 'P1', '安全',
+     'Authorization: Bearer {已过期的JWT}',
+     '-',
+     '401', 'token 过期'),
+    ('用户认证', 'GET/PUT /api/auth/me', 'TC-API-AUTH-023', 'GET', '/api/auth/me', '获取用户-无Bearer前缀', 'P1', '边界',
+     'Authorization: {token}',
+     '-',
+     '401', '鉴权失败'),
+    ('用户认证', 'GET/PUT /api/auth/me', 'TC-API-AUTH-024', 'PUT', '/api/auth/me', '修改资料-更新名字', 'P1', '正向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"name":"新名字"}',
+     '200', 'name 字段已更新'),
+    ('用户认证', 'GET/PUT /api/auth/me', 'TC-API-AUTH-025', 'PUT', '/api/auth/me', '修改资料-上传头像', 'P1', '正向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"avatar":"data:image/jpeg;base64,..."}',
+     '200', 'avatar 字段为该 base64'),
+    ('用户认证', 'GET/PUT /api/auth/me', 'TC-API-AUTH-026', 'PUT', '/api/auth/me', '修改资料-无token', 'P0', '安全',
+     '-',
+     '{"name":"x"}',
+     '401', '未提供认证token'),
+    ('用户认证', 'GET/PUT /api/auth/me', 'TC-API-AUTH-027', 'DELETE', '/api/auth/me', '非法HTTP方法', 'P2', '边界',
+     '-',
+     '-',
+     '405', 'Method Not Allowed'),
+
+    # ============ 知识库模块 ============
+    ('知识库', 'GET /api/articles', 'TC-API-ART-001', 'GET', '/api/articles?page=1&page_size=5', '列表-默认分页', 'P0', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '返回 articles/total/page/page_size'),
+    ('知识库', 'GET /api/articles', 'TC-API-ART-002', 'GET', '/api/articles?category=工作日报', '列表-按分类筛选', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '结果 category 全为"工作日报"'),
+    ('知识库', 'GET /api/articles', 'TC-API-ART-003', 'GET', '/api/articles?tag=测试', '列表-按标签筛选', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '结果 tags 含"测试"'),
+    ('知识库', 'GET /api/articles', 'TC-API-ART-004', 'GET', '/api/articles?favorite=true', '列表-收藏筛选', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '结果 is_favorite=1'),
+    ('知识库', 'GET /api/articles', 'TC-API-ART-005', 'GET', '/api/articles?search=关键词', '列表-搜索', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '结果含关键词'),
+    ('知识库', 'GET /api/articles', 'TC-API-ART-006', 'GET', '/api/articles?category=工作日报&page=2&page_size=10', '列表-组合查询', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '分页与筛选同时生效'),
+    ('知识库', 'GET /api/articles', 'TC-API-ART-007', 'GET', '/api/articles?page=9999', '列表-超出页码', 'P1', '边界',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', 'articles 为空数组'),
+    ('知识库', 'GET /api/articles', 'TC-API-ART-008', 'GET', '/api/articles?page=1&page_size=0', '列表-page_size=0', 'P2', '边界',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '不崩溃'),
+    ('知识库', 'GET /api/articles', 'TC-API-ART-009', 'GET', '/api/articles', '列表-无token', 'P0', '安全',
+     '-',
+     '-',
+     '401', '未提供认证token'),
+    ('知识库', 'GET /api/articles', 'TC-API-ART-010', 'GET', '/api/articles?search=%E6%B5%8B%E8%AF%95', '列表-中文URL编码', 'P1', '边界',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '正确解码并匹配'),
+
+    ('知识库', 'POST /api/articles', 'TC-API-ART-011', 'POST', '/api/articles', '创建-正常流程', 'P0', '正向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"title":"API测试","category":"工作日报","tags":"测试","content":"# 内容","is_draft":0}',
+     '201', '返回 id/message'),
+    ('知识库', 'POST /api/articles', 'TC-API-ART-012', 'POST', '/api/articles', '创建-空标题', 'P0', '反向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"title":"","category":"工作日报","content":"x","is_draft":0}',
+     '400', '标题和内容不能为空'),
+    ('知识库', 'POST /api/articles', 'TC-API-ART-013', 'POST', '/api/articles', '创建-空内容', 'P0', '反向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"title":"标题","category":"工作日报","content":"","is_draft":0}',
+     '400', '标题和内容不能为空'),
+    ('知识库', 'POST /api/articles', 'TC-API-ART-014', 'POST', '/api/articles', '创建-缺title', 'P1', '边界',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"category":"工作日报","content":"x","is_draft":0}',
+     '400', '字段缺失错误'),
+    ('知识库', 'POST /api/articles', 'TC-API-ART-015', 'POST', '/api/articles', '创建-草稿', 'P1', '正向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"title":"草稿","category":"工作日报","content":"x","is_draft":1}',
+     '201', '默认列表不返回草稿'),
+    ('知识库', 'POST /api/articles', 'TC-API-ART-016', 'POST', '/api/articles', '创建-超长标题', 'P2', '边界',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"title":"A*10000","category":"工作日报","content":"x","is_draft":0}',
+     '201', '当前无长度限制'),
+    ('知识库', 'POST /api/articles', 'TC-API-ART-017', 'POST', '/api/articles', '创建-XSS内容', 'P1', '安全',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"title":"x","category":"工作日报","content":"<script>alert(1)</script>","is_draft":0}',
+     '201', '存储（已知风险，前端转义标题）'),
+    ('知识库', 'POST /api/articles', 'TC-API-ART-018', 'POST', '/api/articles', '创建-无token', 'P0', '安全',
+     'Content-Type: application/json',
+     '{"title":"x","category":"工作日报","content":"x","is_draft":0}',
+     '401', '未提供认证token'),
+    ('知识库', 'POST /api/articles', 'TC-API-ART-019', 'POST', '/api/articles', '创建-非JSON body', 'P1', '边界',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     'plain text',
+     '400', '解析失败'),
+
+    ('知识库', 'GET/PUT/DELETE /api/articles/:id', 'TC-API-ART-020', 'GET', '/api/articles/{id}', '详情-正常流程', 'P0', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '返回完整文章，views+1'),
+    ('知识库', 'GET/PUT/DELETE /api/articles/:id', 'TC-API-ART-021', 'GET', '/api/articles/{id}', '详情-浏览次数自增', 'P0', '正向',
+     'Authorization: Bearer {token}',
+     '连续两次GET，对比views',
+     '200', '第二次 views = 第一次 + 1'),
+    ('知识库', 'GET/PUT/DELETE /api/articles/:id', 'TC-API-ART-022', 'GET', '/api/articles/999999', '详情-不存在ID', 'P0', '反向',
+     'Authorization: Bearer {token}',
+     '-',
+     '404', '文章不存在'),
+    ('知识库', 'GET/PUT/DELETE /api/articles/:id', 'TC-API-ART-023', 'GET', '/api/articles/abc', '详情-非整数ID', 'P2', '边界',
+     'Authorization: Bearer {token}',
+     '-',
+     '404', '路由不匹配'),
+    ('知识库', 'GET/PUT/DELETE /api/articles/:id', 'TC-API-ART-024', 'GET', '/api/articles/{id}', '详情-越权访问', 'P0', '安全',
+     'Authorization: Bearer {用户B的token}',
+     '用户B访问用户A的文章',
+     '404', '用户隔离'),
+    ('知识库', 'GET/PUT/DELETE /api/articles/:id', 'TC-API-ART-025', 'PUT', '/api/articles/{id}', '编辑-正常流程', 'P0', '正向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"title":"改后","category":"工作日报","content":"x","is_draft":0}',
+     '200', '字段已更新'),
+    ('知识库', 'GET/PUT/DELETE /api/articles/:id', 'TC-API-ART-026', 'PUT', '/api/articles/999999', '编辑-不存在ID', 'P0', '反向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"title":"x","category":"工作日报","content":"x","is_draft":0}',
+     '404', '文章不存在'),
+    ('知识库', 'GET/PUT/DELETE /api/articles/:id', 'TC-API-ART-027', 'PUT', '/api/articles/{id}', '编辑-越权', 'P0', '安全',
+     'Authorization: Bearer {用户B的token}',
+     '用户B改用户A的文章',
+     '404', '用户隔离'),
+    ('知识库', 'GET/PUT/DELETE /api/articles/:id', 'TC-API-ART-028', 'DELETE', '/api/articles/{id}', '删除-正常流程', 'P0', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '再次GET返回404'),
+    ('知识库', 'GET/PUT/DELETE /api/articles/:id', 'TC-API-ART-029', 'DELETE', '/api/articles/999999', '删除-不存在ID', 'P0', '反向',
+     'Authorization: Bearer {token}',
+     '-',
+     '404', '文章不存在'),
+    ('知识库', 'GET/PUT/DELETE /api/articles/:id', 'TC-API-ART-030', 'DELETE', '/api/articles/{id}', '删除-越权', 'P0', '安全',
+     'Authorization: Bearer {用户B的token}',
+     '用户B删用户A的文章',
+     '404', '用户隔离'),
+
+    ('知识库', 'GET /api/articles/navigate', 'TC-API-ART-031', 'GET', '/api/articles/navigate?current_id={id}&direction=next', '导航-下一篇', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '返回下一篇或 null'),
+    ('知识库', 'GET /api/articles/navigate', 'TC-API-ART-032', 'GET', '/api/articles/navigate?current_id={id}&direction=prev', '导航-上一篇', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '返回上一篇或 null'),
+    ('知识库', 'GET /api/articles/navigate', 'TC-API-ART-033', 'GET', '/api/articles/navigate?current_id={第一篇}&direction=prev', '导航-到头', 'P1', '边界',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', 'article=null'),
+    ('知识库', 'GET /api/articles/navigate', 'TC-API-ART-034', 'GET', '/api/articles/navigate?current_id={id}&direction=invalid', '导航-非法direction', 'P2', '边界',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '返回 null 或默认逻辑'),
+    ('知识库', 'GET /api/articles/navigate', 'TC-API-ART-035', 'GET', '/api/articles/navigate?direction=next', '导航-缺current_id', 'P2', '边界',
+     'Authorization: Bearer {token}',
+     '-',
+     '400/500', '按后端实际处理'),
+
+    ('知识库', 'POST /api/articles/:id/favorite', 'TC-API-ART-036', 'POST', '/api/articles/{id}/favorite', '收藏-切换为收藏', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', 'is_favorite=true'),
+    ('知识库', 'POST /api/articles/:id/favorite', 'TC-API-ART-037', 'POST', '/api/articles/999999/favorite', '收藏-不存在ID', 'P1', '反向',
+     'Authorization: Bearer {token}',
+     '-',
+     '404', '文章不存在'),
+    ('知识库', 'POST /api/articles/:id/favorite', 'TC-API-ART-038', 'POST', '/api/articles/{id}/favorite', '收藏-越权', 'P0', '安全',
+     'Authorization: Bearer {用户B的token}',
+     '用户B收藏用户A的文章',
+     '404', '用户隔离'),
+
+    ('知识库', 'GET/POST/DELETE /api/categories', 'TC-API-ART-039', 'GET', '/api/categories', '分类列表', 'P0', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '返回 id/name/color/article_count'),
+    ('知识库', 'GET/POST/DELETE /api/categories', 'TC-API-ART-040', 'POST', '/api/categories', '新增分类', 'P0', '正向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"name":"新分类","color":"#60a5fa"}',
+     '200', '列表出现新分类'),
+    ('知识库', 'GET/POST/DELETE /api/categories', 'TC-API-ART-041', 'POST', '/api/categories', '新增分类-重名', 'P1', '反向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"name":"已存在","color":"#60a5fa"}',
+     '400/500', 'UNIQUE约束'),
+    ('知识库', 'GET/POST/DELETE /api/categories', 'TC-API-ART-042', 'POST', '/api/categories', '新增分类-空名', 'P1', '边界',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"name":"","color":"#60a5fa"}',
+     '400', '分类名不能为空'),
+    ('知识库', 'GET/POST/DELETE /api/categories', 'TC-API-ART-043', 'DELETE', '/api/categories/{id}', '删除分类', 'P0', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '列表不再包含'),
+    ('知识库', 'GET/POST/DELETE /api/categories', 'TC-API-ART-044', 'DELETE', '/api/categories/999999', '删除-不存在ID', 'P2', '反向',
+     'Authorization: Bearer {token}',
+     '-',
+     '404/200', '按后端实际'),
+
+    ('知识库', 'GET /api/tags', 'TC-API-ART-045', 'GET', '/api/tags', '标签聚合', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '返回 [{name, count}]'),
+    ('知识库', 'GET /api/tags', 'TC-API-ART-046', 'GET', '/api/tags', '标签-无token', 'P0', '安全',
+     '-',
+     '-',
+     '401', '未提供认证token'),
+
+    ('知识库', 'GET /api/stats', 'TC-API-ART-047', 'GET', '/api/stats', '统计', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '返回 total_articles/favorites/total_views'),
+
+    ('知识库', 'POST /api/upload', 'TC-API-ART-048', 'POST', '/api/upload', '上传-正常png', 'P1', '正向',
+     'Authorization: Bearer {token}\nContent-Type: multipart/form-data',
+     'form-data: file=test.png',
+     '200', '返回图片 URL'),
+    ('知识库', 'POST /api/upload', 'TC-API-ART-049', 'POST', '/api/upload', '上传-非法扩展名', 'P1', '反向',
+     'Authorization: Bearer {token}\nContent-Type: multipart/form-data',
+     'form-data: file=test.exe',
+     '400', '不允许的文件类型'),
+    ('知识库', 'POST /api/upload', 'TC-API-ART-050', 'POST', '/api/upload', '上传-无文件字段', 'P2', '边界',
+     'Authorization: Bearer {token}',
+     '-',
+     '400', '无文件'),
+
+    # ============ 猕猴桃销售模块 ============
+    ('猕猴桃销售', 'GET/POST /api/kiwi-sales', 'TC-API-KIWI-001', 'GET', '/api/kiwi-sales?page=1&page_size=5', '列表-默认分页', 'P0', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '返回 sales/total/page/page_size'),
+    ('猕猴桃销售', 'GET/POST /api/kiwi-sales', 'TC-API-KIWI-002', 'GET', '/api/kiwi-sales?customer=张三', '列表-按客户名筛选', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', 'customer_name 含"张三"'),
+    ('猕猴桃销售', 'GET/POST /api/kiwi-sales', 'TC-API-KIWI-003', 'GET', '/api/kiwi-sales?phone=138', '列表-按电话筛选', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', 'phone 含"138"'),
+    ('猕猴桃销售', 'GET/POST /api/kiwi-sales', 'TC-API-KIWI-004', 'GET', '/api/kiwi-sales?year=2026', '列表-按年份筛选', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', 'order_date 年份为 2026'),
+    ('猕猴桃销售', 'GET/POST /api/kiwi-sales', 'TC-API-KIWI-005', 'GET', '/api/kiwi-sales?customer=\' OR 1=1--', '列表-SQL注入尝试', 'P0', '安全',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '参数化查询防护，返回空或无匹配'),
+    ('猕猴桃销售', 'GET/POST /api/kiwi-sales', 'TC-API-KIWI-006', 'GET', '/api/kiwi-sales', '列表-无token', 'P0', '安全',
+     '-',
+     '-',
+     '401', '未提供认证token'),
+    ('猕猴桃销售', 'GET/POST /api/kiwi-sales', 'TC-API-KIWI-007', 'POST', '/api/kiwi-sales', '创建-正常流程', 'P0', '正向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"customer_name":"张三","phone":"13800138000","address":"北京","order_date":"2026-06-28","status":"未发货","tracking_number":"YT001","remark":"5斤装","quantity":2,"payment_amount":100.50}',
+     '201', '返回 id/message'),
+    ('猕猴桃销售', 'GET/POST /api/kiwi-sales', 'TC-API-KIWI-008', 'POST', '/api/kiwi-sales', '创建-客户名为空', 'P0', '反向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"customer_name":"","phone":"13800138000","address":"北京","order_date":"2026-06-28"}',
+     '400', '客户名不能为空'),
+    ('猕猴桃销售', 'GET/POST /api/kiwi-sales', 'TC-API-KIWI-009', 'POST', '/api/kiwi-sales', '创建-手机号格式错误', 'P0', '反向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"customer_name":"张三","phone":"123","address":"北京","order_date":"2026-06-28"}',
+     '400', '请输入有效的11位手机号码'),
+    ('猕猴桃销售', 'GET/POST /api/kiwi-sales', 'TC-API-KIWI-010', 'POST', '/api/kiwi-sales', '创建-手机号11位非手机段', 'P2', '边界',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"customer_name":"张三","phone":"12345678901","address":"北京","order_date":"2026-06-28"}',
+     '201', '当前只校验长度'),
+    ('猕猴桃销售', 'GET/POST /api/kiwi-sales', 'TC-API-KIWI-011', 'POST', '/api/kiwi-sales', '创建-缺地址', 'P0', '反向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"customer_name":"张三","phone":"13800138000","address":"","order_date":"2026-06-28"}',
+     '400', '地址不能为空'),
+    ('猕猴桃销售', 'GET/POST /api/kiwi-sales', 'TC-API-KIWI-012', 'POST', '/api/kiwi-sales', '创建-缺order_date', 'P0', '反向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"customer_name":"张三","phone":"13800138000","address":"北京","order_date":""}',
+     '400', '接单日期不能为空'),
+    ('猕猴桃销售', 'GET/POST /api/kiwi-sales', 'TC-API-KIWI-013', 'POST', '/api/kiwi-sales', '创建-金额负数', 'P2', '边界',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"customer_name":"张三","phone":"13800138000","address":"北京","order_date":"2026-06-28","payment_amount":-100}',
+     '201/400', '当前无校验'),
+    ('猕猴桃销售', 'GET/POST /api/kiwi-sales', 'TC-API-KIWI-014', 'POST', '/api/kiwi-sales', '创建-无token', 'P0', '安全',
+     'Content-Type: application/json',
+     '{"customer_name":"张三","phone":"13800138000"}',
+     '401', '未提供认证token'),
+
+    ('猕猴桃销售', 'PUT/DELETE /api/kiwi-sales/:id', 'TC-API-KIWI-015', 'PUT', '/api/kiwi-sales/{id}', '编辑-正常流程', 'P0', '正向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"customer_name":"张三改","phone":"13800138000","address":"北京","order_date":"2026-06-28","status":"已发货","quantity":1,"payment_amount":50}',
+     '200', '字段已更新'),
+    ('猕猴桃销售', 'PUT/DELETE /api/kiwi-sales/:id', 'TC-API-KIWI-016', 'PUT', '/api/kiwi-sales/999999', '编辑-不存在ID', 'P0', '反向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"customer_name":"x","phone":"13800138000","address":"x","order_date":"2026-06-28"}',
+     '404', '订单不存在'),
+    ('猕猴桃销售', 'PUT/DELETE /api/kiwi-sales/:id', 'TC-API-KIWI-017', 'PUT', '/api/kiwi-sales/{id}', '编辑-手机号错误', 'P0', '反向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"customer_name":"x","phone":"123","address":"x","order_date":"2026-06-28"}',
+     '400', '请输入有效的11位手机号码'),
+    ('猕猴桃销售', 'PUT/DELETE /api/kiwi-sales/:id', 'TC-API-KIWI-018', 'PUT', '/api/kiwi-sales/{id}', '编辑-越权', 'P0', '安全',
+     'Authorization: Bearer {用户B的token}',
+     '用户B改用户A的订单',
+     '404', '用户隔离'),
+    ('猕猴桃销售', 'PUT/DELETE /api/kiwi-sales/:id', 'TC-API-KIWI-019', 'DELETE', '/api/kiwi-sales/{id}', '删除-正常流程', 'P0', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '再次查询返回404'),
+    ('猕猴桃销售', 'PUT/DELETE /api/kiwi-sales/:id', 'TC-API-KIWI-020', 'DELETE', '/api/kiwi-sales/999999', '删除-不存在ID', 'P0', '反向',
+     'Authorization: Bearer {token}',
+     '-',
+     '404', '订单不存在'),
+    ('猕猴桃销售', 'PUT/DELETE /api/kiwi-sales/:id', 'TC-API-KIWI-021', 'DELETE', '/api/kiwi-sales/{id}', '删除-越权', 'P0', '安全',
+     'Authorization: Bearer {用户B的token}',
+     '用户B删用户A的订单',
+     '404', '用户隔离'),
+
+    ('猕猴桃销售', 'POST /api/kiwi-sales/batch-delete', 'TC-API-KIWI-022', 'POST', '/api/kiwi-sales/batch-delete', '批量删除-正常', 'P1', '正向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"ids":[1,2,3]}',
+     '200', 'deleted=3'),
+    ('猕猴桃销售', 'POST /api/kiwi-sales/batch-delete', 'TC-API-KIWI-023', 'POST', '/api/kiwi-sales/batch-delete', '批量删除-空ids', 'P1', '边界',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"ids":[]}',
+     '400', '请提供ID列表'),
+    ('猕猴桃销售', 'POST /api/kiwi-sales/batch-delete', 'TC-API-KIWI-024', 'POST', '/api/kiwi-sales/batch-delete', '批量删除-不存在id', 'P2', '边界',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"ids":[999999]}',
+     '200', 'deleted=0'),
+    ('猕猴桃销售', 'POST /api/kiwi-sales/batch-delete', 'TC-API-KIWI-025', 'POST', '/api/kiwi-sales/batch-delete', '批量删除-非数组', 'P2', '边界',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"ids":"notarray"}',
+     '400', '类型错误'),
+    ('猕猴桃销售', 'POST /api/kiwi-sales/batch-delete', 'TC-API-KIWI-026', 'POST', '/api/kiwi-sales/batch-delete', '批量删除-SQL注入', 'P0', '安全',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"ids":["1 OR 1=1"]}',
+     '400/500', '参数化查询防护'),
+
+    ('猕猴桃销售', 'GET /api/kiwi-sales-report', 'TC-API-KIWI-027', 'GET', '/api/kiwi-sales-report?page=1&page_size=10', '报表-默认查询', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '返回 report/summary'),
+    ('猕猴桃销售', 'GET /api/kiwi-sales-report', 'TC-API-KIWI-028', 'GET', '/api/kiwi-sales-report?page=9999', '报表-分页边界', 'P2', '边界',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', 'report 为空数组'),
+    ('猕猴桃销售', 'GET /api/kiwi-sales-report', 'TC-API-KIWI-029', 'GET', '/api/kiwi-sales-report', '报表-无token', 'P0', '安全',
+     '-',
+     '-',
+     '401', '未提供认证token'),
+    ('猕猴桃销售', 'GET /api/kiwi-sales-report', 'TC-API-KIWI-030', 'GET', '/api/kiwi-sales-report', '报表-数据正确性', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '对比报表汇总与实际订单总额',
+     '200', '两者一致'),
+
+    ('猕猴桃销售', 'GET /api/kiwi-sales/export', 'TC-API-KIWI-031', 'GET', '/api/kiwi-sales/export', '导出-正常', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', 'Content-Type: text/csv;charset=gbk，GBK可解码'),
+    ('猕猴桃销售', 'GET /api/kiwi-sales/export', 'TC-API-KIWI-032', 'GET', '/api/kiwi-sales/export', '导出-无数据', 'P1', '边界',
+     'Authorization: Bearer {token}',
+     '用户无订单',
+     '400', '没有数据可导出'),
+    ('猕猴桃销售', 'GET /api/kiwi-sales/export', 'TC-API-KIWI-033', 'GET', '/api/kiwi-sales/export', '导出-编码验证', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '下载CSV用GBK解码',
+     '200', '中文字段正确显示'),
+    ('猕猴桃销售', 'GET /api/kiwi-sales/export', 'TC-API-KIWI-034', 'GET', '/api/kiwi-sales/export?customer=张三', '导出-按筛选', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', 'CSV仅含张三订单'),
+    ('猕猴桃销售', 'GET /api/kiwi-sales/export', 'TC-API-KIWI-035', 'GET', '/api/kiwi-sales/export', '导出-无token', 'P0', '安全',
+     '-',
+     '-',
+     '401', '未提供认证token'),
+
+    # ============ 加班模块 ============
+    ('加班记录', 'GET/POST /api/overtime', 'TC-API-OT-001', 'GET', '/api/overtime?page=1&page_size=5', '列表-默认分页', 'P0', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '返回 records/total/page/page_size'),
+    ('加班记录', 'GET/POST /api/overtime', 'TC-API-OT-002', 'GET', '/api/overtime?month=2026-06', '列表-按月份筛选', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', 'date 月份为 2026-06'),
+    ('加班记录', 'GET/POST /api/overtime', 'TC-API-OT-003', 'GET', '/api/overtime', '列表-无token', 'P0', '安全',
+     '-',
+     '-',
+     '401', '未提供认证token'),
+    ('加班记录', 'GET/POST /api/overtime', 'TC-API-OT-004', 'POST', '/api/overtime', '创建-平时加班时长', 'P0', '正向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"overtime_type":"weekday","date":"2026-07-01","start_time":"18:00","end_time":"22:00","remark":"测试"}',
+     '201', 'duration=3.0（从19:00起算）'),
+    ('加班记录', 'GET/POST /api/overtime', 'TC-API-OT-005', 'POST', '/api/overtime', '创建-周末含午休扣除', 'P0', '正向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"overtime_type":"weekend","date":"2026-07-05","start_time":"09:00","end_time":"18:00","remark":"周末"}',
+     '201', 'duration=7.0（扣2h午休）'),
+    ('加班记录', 'GET/POST /api/overtime', 'TC-API-OT-006', 'POST', '/api/overtime', '创建-周末下午不跨午休', 'P1', '正向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"overtime_type":"weekend","date":"2026-07-06","start_time":"15:00","end_time":"18:00","remark":"下午"}',
+     '201', 'duration=3.0'),
+    ('加班记录', 'GET/POST /api/overtime', 'TC-API-OT-007', 'POST', '/api/overtime', '创建-缺字段', 'P0', '反向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"overtime_type":"weekday","date":"2026-07-01"}',
+     '400', '开始时间和结束时间不能为空'),
+    ('加班记录', 'GET/POST /api/overtime', 'TC-API-OT-008', 'POST', '/api/overtime', '创建-非法加班类型', 'P0', '反向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"overtime_type":"holiday","date":"2026-07-01","start_time":"09:00","end_time":"18:00"}',
+     '400', '类型必须是 weekday 或 weekend'),
+    ('加班记录', 'GET/POST /api/overtime', 'TC-API-OT-009', 'POST', '/api/overtime', '创建-时间格式错误', 'P0', '反向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"overtime_type":"weekday","date":"2026-07-01","start_time":"25:00","end_time":"22:00"}',
+     '400', '时间格式错误'),
+    ('加班记录', 'GET/POST /api/overtime', 'TC-API-OT-010', 'POST', '/api/overtime', '创建-结束早于开始', 'P0', '反向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"overtime_type":"weekday","date":"2026-07-01","start_time":"20:00","end_time":"18:00"}',
+     '400', '结束时间必须晚于开始时间'),
+    ('加班记录', 'GET/POST /api/overtime', 'TC-API-OT-011', 'POST', '/api/overtime', '创建-平时结束越界', 'P0', '反向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"overtime_type":"weekday","date":"2026-07-01","start_time":"18:00","end_time":"18:00"}',
+     '400', '平时结束需在19:00-23:59'),
+    ('加班记录', 'GET/POST /api/overtime', 'TC-API-OT-012', 'POST', '/api/overtime', '创建-周末时间越界', 'P0', '反向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"overtime_type":"weekend","date":"2026-07-05","start_time":"08:00","end_time":"18:00"}',
+     '400', '周末范围为09:00-23:00'),
+    ('加班记录', 'GET/POST /api/overtime', 'TC-API-OT-013', 'POST', '/api/overtime', '创建-同日重复', 'P1', '反向',
+     '该日期已有记录',
+     'Authorization: Bearer {token}\nContent-Type: application/json\n{"overtime_type":"weekday","date":"已存在日期","start_time":"18:00","end_time":"22:00"}',
+     '400', '该日期已存在加班记录'),
+    ('加班记录', 'GET/POST /api/overtime', 'TC-API-OT-014', 'POST', '/api/overtime', '创建-无token', 'P0', '安全',
+     'Content-Type: application/json',
+     '{"overtime_type":"weekday","date":"2026-07-01","start_time":"18:00","end_time":"22:00"}',
+     '401', '未提供认证token'),
+    ('加班记录', 'GET/POST /api/overtime', 'TC-API-OT-015', 'POST', '/api/overtime', '创建-duration边界', 'P2', '边界',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"overtime_type":"weekday","date":"2026-07-01","start_time":"18:00","end_time":"23:59"}',
+     '201', 'duration≈4.98'),
+
+    ('加班记录', 'PUT/DELETE /api/overtime/:id', 'TC-API-OT-016', 'PUT', '/api/overtime/{id}', '编辑-正常流程', 'P0', '正向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"overtime_type":"weekday","date":"2026-07-01","start_time":"18:00","end_time":"23:00","remark":"改"}',
+     '200', 'duration重新计算'),
+    ('加班记录', 'PUT/DELETE /api/overtime/:id', 'TC-API-OT-017', 'PUT', '/api/overtime/999999', '编辑-不存在ID', 'P0', '反向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"overtime_type":"weekday","date":"2026-07-01","start_time":"18:00","end_time":"22:00"}',
+     '404', '记录不存在'),
+    ('加班记录', 'PUT/DELETE /api/overtime/:id', 'TC-API-OT-018', 'PUT', '/api/overtime/{id}', '编辑-越权', 'P0', '安全',
+     'Authorization: Bearer {用户B的token}',
+     '用户B改用户A的记录',
+     '404', '用户隔离'),
+    ('加班记录', 'PUT/DELETE /api/overtime/:id', 'TC-API-OT-019', 'PUT', '/api/overtime/{id}', '编辑-时间校验仍生效', 'P0', '反向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"overtime_type":"weekday","date":"2026-07-01","start_time":"18:00","end_time":"18:00"}',
+     '400', '平时结束需在19:00-23:59'),
+    ('加班记录', 'PUT/DELETE /api/overtime/:id', 'TC-API-OT-020', 'DELETE', '/api/overtime/{id}', '删除-正常流程', 'P0', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '再次查询返回404'),
+    ('加班记录', 'PUT/DELETE /api/overtime/:id', 'TC-API-OT-021', 'DELETE', '/api/overtime/999999', '删除-不存在ID', 'P0', '反向',
+     'Authorization: Bearer {token}',
+     '-',
+     '404', '记录不存在'),
+    ('加班记录', 'PUT/DELETE /api/overtime/:id', 'TC-API-OT-022', 'DELETE', '/api/overtime/{id}', '删除-越权', 'P0', '安全',
+     'Authorization: Bearer {用户B的token}',
+     '用户B删用户A的记录',
+     '404', '用户隔离'),
+
+    ('加班记录', 'POST /api/overtime/batch-delete', 'TC-API-OT-023', 'POST', '/api/overtime/batch-delete', '批量删除-正常', 'P1', '正向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"ids":[1,2]}',
+     '200', 'deleted=2'),
+    ('加班记录', 'POST /api/overtime/batch-delete', 'TC-API-OT-024', 'POST', '/api/overtime/batch-delete', '批量删除-空ids', 'P1', '边界',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"ids":[]}',
+     '400', '请提供ID列表'),
+    ('加班记录', 'POST /api/overtime/batch-delete', 'TC-API-OT-025', 'POST', '/api/overtime/batch-delete', '批量删除-不存在id', 'P2', '边界',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"ids":[999999]}',
+     '200', 'deleted=0'),
+    ('加班记录', 'POST /api/overtime/batch-delete', 'TC-API-OT-026', 'POST', '/api/overtime/batch-delete', '批量删除-非数组', 'P2', '边界',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"ids":"x"}',
+     '400', '类型错误'),
+    ('加班记录', 'POST /api/overtime/batch-delete', 'TC-API-OT-027', 'POST', '/api/overtime/batch-delete', '批量删除-越权', 'P0', '安全',
+     'Authorization: Bearer {用户B的token}\nContent-Type: application/json',
+     '{"ids":[用户A的id]}',
+     '200', 'deleted=0，用户隔离'),
+
+    ('加班记录', 'GET /api/overtime/stats', 'TC-API-OT-028', 'GET', '/api/overtime/stats', '统计-默认', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '返回 total_count/total_hours/weekday_total/weekend_total'),
+    ('加班记录', 'GET /api/overtime/stats', 'TC-API-OT-029', 'GET', '/api/overtime/stats?month=2026-06', '统计-按月份', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '返回该月统计'),
+    ('加班记录', 'GET /api/overtime/stats', 'TC-API-OT-030', 'GET', '/api/overtime/stats', '统计-无数据', 'P2', '边界',
+     'Authorization: Bearer {token}',
+     '用户无加班记录',
+     '200', '各项为0'),
+    ('加班记录', 'GET /api/overtime/stats', 'TC-API-OT-031', 'GET', '/api/overtime/stats', '统计-无token', 'P0', '安全',
+     '-',
+     '-',
+     '401', '未提供认证token'),
+    ('加班记录', 'GET /api/overtime/stats', 'TC-API-OT-032', 'GET', '/api/overtime/stats', '统计-数据正确性', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '对比stats与手动累加duration',
+     '200', 'total_hours一致'),
+
+    # ============ 消费记账模块 ============
+    ('消费记账', 'GET/POST /api/expenses', 'TC-API-EXP-001', 'GET', '/api/expenses?page=1&page_size=10', '列表-默认分页', 'P0', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '返回 records/total/page/page_size'),
+    ('消费记账', 'GET/POST /api/expenses', 'TC-API-EXP-002', 'GET', '/api/expenses?month=2026-06', '列表-按月份筛选', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', 'date 月份为 2026-06'),
+    ('消费记账', 'GET/POST /api/expenses', 'TC-API-EXP-003', 'GET', '/api/expenses?category=交通', '列表-按分类筛选', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', 'category="交通"'),
+    ('消费记账', 'GET/POST /api/expenses', 'TC-API-EXP-004', 'GET', '/api/expenses', '列表-无token', 'P0', '安全',
+     '-',
+     '-',
+     '401', '未提供认证token'),
+    ('消费记账', 'GET/POST /api/expenses', 'TC-API-EXP-005', 'POST', '/api/expenses', '创建-正常流程', 'P0', '正向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"category":"交通","amount":20.50,"remark":"地铁","date":"2026-06-28"}',
+     '201', '返回 id/message'),
+    ('消费记账', 'GET/POST /api/expenses', 'TC-API-EXP-006', 'POST', '/api/expenses', '创建-非法分类', 'P0', '反向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"category":"餐饮","amount":20,"date":"2026-06-28"}',
+     '400', '无效的分类: 餐饮'),
+    ('消费记账', 'GET/POST /api/expenses', 'TC-API-EXP-007', 'POST', '/api/expenses', '创建-缺分类', 'P0', '反向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"category":"","amount":20,"date":"2026-06-28"}',
+     '400', '请选择分类'),
+    ('消费记账', 'GET/POST /api/expenses', 'TC-API-EXP-008', 'POST', '/api/expenses', '创建-金额为空', 'P0', '反向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"category":"交通","date":"2026-06-28"}',
+     '400', '请输入金额'),
+    ('消费记账', 'GET/POST /api/expenses', 'TC-API-EXP-009', 'POST', '/api/expenses', '创建-负数金额', 'P0', '反向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"category":"交通","amount":-10,"date":"2026-06-28"}',
+     '400', '金额必须大于0'),
+    ('消费记账', 'GET/POST /api/expenses', 'TC-API-EXP-010', 'POST', '/api/expenses', '创建-零金额', 'P0', '反向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"category":"交通","amount":0,"date":"2026-06-28"}',
+     '400', '金额必须大于0'),
+    ('消费记账', 'GET/POST /api/expenses', 'TC-API-EXP-011', 'POST', '/api/expenses', '创建-缺日期', 'P0', '反向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"category":"交通","amount":20,"date":""}',
+     '400', '请选择日期'),
+    ('消费记账', 'GET/POST /api/expenses', 'TC-API-EXP-012', 'POST', '/api/expenses', '创建-白名单全分类', 'P0', '正向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '依次用7个白名单分类创建',
+     '201', '全部成功'),
+    ('消费记账', 'GET/POST /api/expenses', 'TC-API-EXP-013', 'POST', '/api/expenses', '创建-金额为字符串', 'P2', '边界',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"category":"交通","amount":"20.5","date":"2026-06-28"}',
+     '201/400', '后端float转换'),
+    ('消费记账', 'GET/POST /api/expenses', 'TC-API-EXP-014', 'POST', '/api/expenses', '创建-金额超精度', 'P2', '边界',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"category":"交通","amount":20.555,"date":"2026-06-28"}',
+     '201', '存储为20.55'),
+    ('消费记账', 'GET/POST /api/expenses', 'TC-API-EXP-015', 'POST', '/api/expenses', '创建-无token', 'P0', '安全',
+     'Content-Type: application/json',
+     '{"category":"交通","amount":20,"date":"2026-06-28"}',
+     '401', '未提供认证token'),
+    ('消费记账', 'GET/POST /api/expenses', 'TC-API-EXP-016', 'POST', '/api/expenses', '创建-非JSON body', 'P1', '边界',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     'plain text',
+     '400', '解析失败'),
+
+    ('消费记账', 'PUT/DELETE /api/expenses/:id', 'TC-API-EXP-017', 'PUT', '/api/expenses/{id}', '编辑-正常流程', 'P0', '正向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"category":"电费","amount":30,"remark":"改","date":"2026-06-28"}',
+     '200', '字段已更新'),
+    ('消费记账', 'PUT/DELETE /api/expenses/:id', 'TC-API-EXP-018', 'PUT', '/api/expenses/{id}', '编辑-非法分类', 'P0', '反向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"category":"非法","amount":1,"date":"2026-06-28"}',
+     '400', '无效的分类'),
+    ('消费记账', 'PUT/DELETE /api/expenses/:id', 'TC-API-EXP-019', 'PUT', '/api/expenses/{id}', '编辑-负数金额', 'P0', '反向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"category":"交通","amount":-1,"date":"2026-06-28"}',
+     '400', '金额必须大于0'),
+    ('消费记账', 'PUT/DELETE /api/expenses/:id', 'TC-API-EXP-020', 'PUT', '/api/expenses/999999', '编辑-不存在ID', 'P0', '反向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"category":"交通","amount":1,"date":"2026-06-28"}',
+     '404', '记录不存在'),
+    ('消费记账', 'PUT/DELETE /api/expenses/:id', 'TC-API-EXP-021', 'PUT', '/api/expenses/{id}', '编辑-越权', 'P0', '安全',
+     'Authorization: Bearer {用户B的token}',
+     '用户B改用户A的记录',
+     '404', '用户隔离'),
+    ('消费记账', 'PUT/DELETE /api/expenses/:id', 'TC-API-EXP-022', 'DELETE', '/api/expenses/{id}', '删除-正常流程', 'P0', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '再次查询返回404'),
+    ('消费记账', 'PUT/DELETE /api/expenses/:id', 'TC-API-EXP-023', 'DELETE', '/api/expenses/999999', '删除-不存在ID', 'P0', '反向',
+     'Authorization: Bearer {token}',
+     '-',
+     '404', '记录不存在'),
+    ('消费记账', 'PUT/DELETE /api/expenses/:id', 'TC-API-EXP-024', 'DELETE', '/api/expenses/{id}', '删除-越权', 'P0', '安全',
+     'Authorization: Bearer {用户B的token}',
+     '用户B删用户A的记录',
+     '404', '用户隔离'),
+
+    ('消费记账', 'POST /api/expenses/batch-delete', 'TC-API-EXP-025', 'POST', '/api/expenses/batch-delete', '批量删除-正常', 'P1', '正向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"ids":[1,2]}',
+     '200', 'deleted=2'),
+    ('消费记账', 'POST /api/expenses/batch-delete', 'TC-API-EXP-026', 'POST', '/api/expenses/batch-delete', '批量删除-空ids', 'P1', '边界',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"ids":[]}',
+     '400', '请提供ID列表'),
+    ('消费记账', 'POST /api/expenses/batch-delete', 'TC-API-EXP-027', 'POST', '/api/expenses/batch-delete', '批量删除-不存在id', 'P2', '边界',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"ids":[999999]}',
+     '200', 'deleted=0'),
+    ('消费记账', 'POST /api/expenses/batch-delete', 'TC-API-EXP-028', 'POST', '/api/expenses/batch-delete', '批量删除-非数组', 'P2', '边界',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"ids":"x"}',
+     '400', '类型错误'),
+    ('消费记账', 'POST /api/expenses/batch-delete', 'TC-API-EXP-029', 'POST', '/api/expenses/batch-delete', '批量删除-SQL注入', 'P0', '安全',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"ids":["1 OR 1=1"]}',
+     '400/500', '参数化查询防护'),
+
+    ('消费记账', 'GET /api/expenses/stats', 'TC-API-EXP-030', 'GET', '/api/expenses/stats', '统计-默认', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '返回 categories/grand_total'),
+    ('消费记账', 'GET /api/expenses/stats', 'TC-API-EXP-031', 'GET', '/api/expenses/stats?month=2026-06', '统计-按月份', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '返回该月统计'),
+    ('消费记账', 'GET /api/expenses/stats', 'TC-API-EXP-032', 'GET', '/api/expenses/stats?year=2026&start_month=01&end_month=06', '统计-年份+月份范围', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '返回2026年1-6月统计'),
+    ('消费记账', 'GET /api/expenses/stats', 'TC-API-EXP-033', 'GET', '/api/expenses/stats?year=2026&start_month=03', '统计-仅start_month', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '返回2026年3月起统计'),
+    ('消费记账', 'GET /api/expenses/stats', 'TC-API-EXP-034', 'GET', '/api/expenses/stats?year=2026&end_month=06', '统计-仅end_month', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', '返回2026年1-6月统计'),
+    ('消费记账', 'GET /api/expenses/stats', 'TC-API-EXP-035', 'GET', '/api/expenses/stats', '统计-无数据', 'P2', '边界',
+     'Authorization: Bearer {token}',
+     '用户无消费记录',
+     '200', 'grand_total=0，categories空'),
+    ('消费记账', 'GET /api/expenses/stats', 'TC-API-EXP-036', 'GET', '/api/expenses/stats', '统计-无token', 'P0', '安全',
+     '-',
+     '-',
+     '401', '未提供认证token'),
+    ('消费记账', 'GET /api/expenses/stats', 'TC-API-EXP-037', 'GET', '/api/expenses/stats', '统计-数据正确性', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '对比stats与手动累加',
+     '200', '金额一致'),
+
+    ('消费记账', 'GET/POST /api/expenses/export', 'TC-API-EXP-038', 'GET', '/api/expenses/export', '导出-GET正常', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', 'Content-Type: text/csv;charset=gbk'),
+    ('消费记账', 'GET/POST /api/expenses/export', 'TC-API-EXP-039', 'POST', '/api/expenses/export', '导出-POST选中ids', 'P1', '正向',
+     'Authorization: Bearer {token}\nContent-Type: application/json',
+     '{"ids":[1,2]}',
+     '200', 'CSV仅含选中id'),
+    ('消费记账', 'GET/POST /api/expenses/export', 'TC-API-EXP-040', 'GET', '/api/expenses/export', '导出-无数据', 'P1', '边界',
+     'Authorization: Bearer {token}',
+     '用户无消费记录',
+     '400', '没有数据可导出'),
+    ('消费记账', 'GET/POST /api/expenses/export', 'TC-API-EXP-041', 'GET', '/api/expenses/export', '导出-编码验证', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '下载CSV用GBK解码',
+     '200', '中文字段正确显示'),
+    ('消费记账', 'GET/POST /api/expenses/export', 'TC-API-EXP-042', 'GET', '/api/expenses/export?month=2026-06', '导出-按月份', 'P1', '正向',
+     'Authorization: Bearer {token}',
+     '-',
+     '200', 'CSV仅含2026-06记录'),
+    ('消费记账', 'GET/POST /api/expenses/export', 'TC-API-EXP-043', 'GET', '/api/expenses/export', '导出-无token', 'P0', '安全',
+     '-',
+     '-',
+     '401', '未提供认证token'),
+]
+
+
+def build_excel():
+    wb = Workbook()
+    ws = wb.active
+    ws.title = '接口测试用例'
+
+    ws.append(COLUMNS)
+    for col in range(1, len(COLUMNS) + 1):
+        cell = ws.cell(row=1, column=col)
+        cell.fill = HEADER_FILL
+        cell.font = HEADER_FONT
+        cell.alignment = CENTER
+        cell.border = BORDER
+
+    for case in CASES:
+        main_module, api, case_id, method, path, title, priority, case_type, headers, body, code, expected = case
+        row = [case_id, main_module, api, method, path, title, priority, case_type, headers, body, code, expected]
+        ws.append(row)
+        r = ws.max_row
+        for col in range(1, len(COLUMNS) + 1):
+            cell = ws.cell(row=r, column=col)
+            cell.font = MONO_FONT if col in (5, 10) else CELL_FONT
+            cell.border = BORDER
+            cell.alignment = LEFT if col in (5, 9, 10, 12) else CENTER
+        pcell = ws.cell(row=r, column=7)
+        if priority == 'P0':
+            pcell.fill = P0_FILL
+        elif priority == 'P1':
+            pcell.fill = P1_FILL
+        else:
+            pcell.fill = P2_FILL
+
+    # 合并主模块、接口单元格
+    def merge_col(col_idx):
+        start = 2
+        for i in range(3, ws.max_row + 2):
+            cur = ws.cell(row=i, column=col_idx).value if i <= ws.max_row else None
+            prev = ws.cell(row=i - 1, column=col_idx).value
+            if i <= ws.max_row and cur == prev:
+                continue
+            if i - 1 > start:
+                ws.merge_cells(start_row=start, start_column=col_idx, end_row=i - 1, end_column=col_idx)
+                cell = ws.cell(row=start, column=col_idx)
+                cell.fill = MODULE_FILL if col_idx == 2 else API_FILL
+                cell.font = MODULE_FONT if col_idx == 2 else API_FONT
+                cell.alignment = CENTER
+            start = i
+        if ws.max_row >= start:
+            ws.merge_cells(start_row=start, start_column=col_idx, end_row=ws.max_row, end_column=col_idx)
+            cell = ws.cell(row=start, column=col_idx)
+            cell.fill = MODULE_FILL if col_idx == 2 else API_FILL
+            cell.font = MODULE_FONT if col_idx == 2 else API_FONT
+            cell.alignment = CENTER
+
+    merge_col(2)  # 主模块
+    merge_col(3)  # 接口
+
+    widths = [18, 14, 26, 10, 40, 24, 8, 8, 24, 50, 12, 30]
+    for i, w in enumerate(widths, 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    ws.row_dimensions[1].height = 32
+    for r in range(2, ws.max_row + 1):
+        ws.row_dimensions[r].height = 48
+    ws.freeze_panes = 'A2'
+
+    # 统计 sheet
+    ws2 = wb.create_sheet('用例统计')
+    ws2.append(['主模块', '接口数', '用例数', 'P0', 'P1', 'P2'])
+    for col in range(1, 7):
+        cell = ws2.cell(row=1, column=col)
+        cell.fill = HEADER_FILL
+        cell.font = HEADER_FONT
+        cell.alignment = CENTER
+        cell.border = BORDER
+
+    from collections import defaultdict
+    stats = defaultdict(lambda: {'apis': set(), 'total': 0, 'P0': 0, 'P1': 0, 'P2': 0})
+    for case in CASES:
+        m = case[0]
+        stats[m]['apis'].add(case[1])
+        stats[m]['total'] += 1
+        stats[m][case[6]] += 1
+
+    row_idx = 2
+    for module, data in stats.items():
+        ws2.append([module, len(data['apis']), data['total'], data['P0'], data['P1'], data['P2']])
+        for col in range(1, 7):
+            cell = ws2.cell(row=row_idx, column=col)
+            cell.font = CELL_FONT
+            cell.border = BORDER
+            cell.alignment = CENTER
+        row_idx += 1
+    total_apis = sum(len(d['apis']) for d in stats.values())
+    total_all = sum(d['total'] for d in stats.values())
+    total_p0 = sum(d['P0'] for d in stats.values())
+    total_p1 = sum(d['P1'] for d in stats.values())
+    total_p2 = sum(d['P2'] for d in stats.values())
+    ws2.append(['合计', total_apis, total_all, total_p0, total_p1, total_p2])
+    for col in range(1, 7):
+        cell = ws2.cell(row=row_idx, column=col)
+        cell.fill = MODULE_FILL
+        cell.font = MODULE_FONT
+        cell.alignment = CENTER
+        cell.border = BORDER
+
+    widths2 = [16, 12, 12, 8, 8, 8]
+    for i, w in enumerate(widths2, 1):
+        ws2.column_dimensions[get_column_letter(i)].width = w
+    ws2.row_dimensions[1].height = 30
+
+    wb.save(OUT_FILE)
+    print(f'已生成: {OUT_FILE}')
+    print(f'用例总数: {len(CASES)}')
+    print(f'主模块数: {len(stats)}')
+    print(f'接口数: {total_apis}')
+
+
+if __name__ == '__main__':
+    build_excel()

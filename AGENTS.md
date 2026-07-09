@@ -86,7 +86,13 @@ python test_api.py               # smoke test, server must run on localhost:5001
   **现象**: PowerShell 双引号中/Python单引号中转义:${} 被解析为变量
   **根因**: PowerShell 解析 ${} 为变量、单引号中转义冲突
   **修复**: 写入 .py 文件再执行，或使用 chr(39) 构造引号
-  **规则**: 永远不要通过 PS 命令行传含中文和模板字符串的 Python 代码
+   **规则**: 永远不要通过 PS 命令行传含中文和模板字符串的 Python 代码
+
+### 2026-07-09 Flask 路由装饰器遗漏导致接口无法访问
+- **现象**: 猕猴桃销售列表页数据无法加载，后端 `/api/kiwi-sales` 接口始终无响应
+- **根因**: `get_kiwi_sales()` 函数上方缺少 `@app.route("/api/kiwi-sales", methods=["GET"])` 和 `@login_required` 装饰器
+- **修复**: 在函数定义前补上两个装饰器
+- **规则**: 新增或移动 Flask 路由函数时，**必须**检查 `@app.route()` + `@login_required` 装饰器是否完整；批量重构后运行一次 `test_api.py` 验证所有接口可达
 
 ## 架构风险预警
 ### 并发安全
