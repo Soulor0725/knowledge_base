@@ -1891,6 +1891,14 @@
         }
         function _clearDomCache() { for (const k in _domCache) delete _domCache[k]; }
 
+        /** 本地时间 YYYY-MM-DD（给 date input 默认值用，禁止使用 toISOString 的 UTC 日期） */
+        function todayLocalISO(d = new Date()) {
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${y}-${m}-${day}`;
+        }
+
         async function fetchWithTimeout(url, options = {}, timeout = 15000) {
             const controller = new AbortController();
             const timer = setTimeout(() => controller.abort(), timeout);
@@ -3390,7 +3398,7 @@
             document.getElementById('kiwiSaleId').value = '';
             document.getElementById('kiwiSalesModalTitle').textContent = '新增订单';
             if (!id) {
-                _$('kiwiOrderDate').value = new Date().toISOString().slice(0, 10);
+                _$('kiwiOrderDate').value = todayLocalISO();
             }
             if (id) {
                 const sale = kiwiSalesData.find(s => s.id === id);
@@ -3554,7 +3562,7 @@
         let expenseTotal = 0;
         let expenseCurrentPage = 1;
         let expensePageSize = 5;
-        let expenseMonthFilter = '';
+        let expenseDateFilter = '';
         let expenseCategoryFilter = '';
         let selectedExpenseIds = new Set();
         const EXPENSE_CATEGORIES = ['燃气费', '电费', '话费', '网费', '暖气费', '香烟', '菜肉米面油', '交通', '物业费', '水果', '其他'];
@@ -3563,7 +3571,7 @@
         async function loadExpenses() {
             try {
                 let url = `${API_URL}/expenses?page=${expenseCurrentPage}&page_size=${expensePageSize}`;
-                if (expenseMonthFilter) url += `&month=${expenseMonthFilter}`;
+                if (expenseDateFilter) url += `&date=${encodeURIComponent(expenseDateFilter)}`;
                 if (expenseCategoryFilter) url += `&category=${encodeURIComponent(expenseCategoryFilter)}`;
                 const response = await fetchWithTimeout(url, { headers: getAuthHeaders() });
                 if (!response.ok) throw new Error('加载失败');
@@ -3576,10 +3584,36 @@
                 const selectAll = document.getElementById('selectAllExpense');
                 if (selectAll) selectAll.checked = false;
                 updateExpenseDeleteBtn();
+                refreshExpenseToday();
             } catch (error) {
                 console.error('加载记账记录失败:', error);
                 const el = document.getElementById('expenseTableBody');
                 if (el) el.innerHTML = '<div class="empty-state-card"><i class="fa fa-exclamation-triangle"></i><p>加载失败，请刷新重试</p></div>';
+            }
+        }
+
+        async function refreshExpenseToday() {
+            const labelEl = document.getElementById('expenseTodayLabel');
+            const totalEl = document.getElementById('expenseTodayTotal');
+            const countEl = document.getElementById('expenseTodayCount');
+            if (!labelEl && !totalEl && !countEl) return;
+            // 摘要始终跟随当前所选日期
+            const date = expenseDateFilter || todayLocalISO();
+            try {
+                const res = await fetchWithTimeout(
+                    `${API_URL}/expenses/today?date=${encodeURIComponent(date)}`,
+                    { headers: getAuthHeaders() }
+                );
+                if (!res.ok) throw new Error('today stats failed');
+                const data = await res.json();
+                if (labelEl) labelEl.textContent = data.date;
+                if (totalEl) totalEl.textContent = parseFloat(data.total).toFixed(2);
+                if (countEl) countEl.textContent = data.count;
+            } catch (e) {
+                console.error('加载消费汇总失败:', e);
+                if (labelEl) labelEl.textContent = date;
+                if (totalEl) totalEl.textContent = '加载失败';
+                if (countEl) countEl.textContent = '-';
             }
         }
 
@@ -3646,14 +3680,13 @@
         function showExpenses() {
             window.scrollTo(0, 0);
             expenseCurrentPage = 1;
-            expenseMonthFilter = '';
+            expenseDateFilter = '';
             expenseCategoryFilter = '';
             selectedExpenseIds.clear();
             const toolbar = document.querySelector('.toolbar');
             if (toolbar) toolbar.style.display = 'none';
             updateStatsBarVisibility(true);
-            const now = new Date();
-            const defaultMonth = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+            const defaultDate = todayLocalISO();
             document.getElementById('articleList').innerHTML = `
                 <div id="expenseSection" style="padding: 20px;">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
@@ -3664,8 +3697,8 @@
                     </div>
                     <div style="display:flex;align-items:center;margin-bottom:15px;gap:10px;">
                         <div style="display:flex;align-items:center;gap:8px;">
-                            <label style="font-size:12px;color:#94a3b8;">月份：</label>
-                            <input type="month" id="expenseMonthFilter" value="${defaultMonth}" onchange="filterExpenseByMonth()" style="padding:8px 12px;border:1px solid rgba(148,163,184,0.2);border-radius:6px;background:rgba(30,41,59,0.8);color:#cbd5e1;font-size:12px;">
+                            <label style="font-size:12px;color:#94a3b8;">日消费：</label>
+                            <input type="date" id="expenseDateFilter" value="${defaultDate}" onchange="filterExpenseByDate()" style="padding:8px 12px;border:1px solid rgba(148,163,184,0.2);border-radius:6px;background:rgba(30,41,59,0.8);color:#cbd5e1;font-size:12px;">
                         </div>
                         <div style="display:flex;align-items:center;gap:8px;">
                             <label style="font-size:12px;color:#94a3b8;">分类：</label>
@@ -3678,6 +3711,11 @@
                         <button class="btn btn-secondary" onclick="exportExpenses()" style="padding:8px 16px;font-size:12px;font-weight:500;"><i class="fa fa-download"></i> 导出</button>
                         <button class="btn btn-danger" id="deleteSelectedExpenseBtn" onclick="deleteSelectedExpenses()" style="padding:8px 16px;font-size:12px;font-weight:500;display:none;"><i class="fa fa-trash"></i> 删除选中 (<span id="selectedExpenseCount">0</span>)</button>
                     </div>
+                    <div id="expenseTodayBar" style="display:flex;align-items:center;gap:16px;margin-bottom:15px;padding:10px 16px;background:rgba(20,184,166,0.08);border:1px solid rgba(20,184,166,0.2);border-radius:8px;font-size:13px;">
+                        <span style="color:#94a3b8;">📅 <span id="expenseTodayLabel" style="font-weight:600;color:#cbd5e1;"></span></span>
+                        <span style="color:#2dd4bf;font-weight:600;">合计：¥<span id="expenseTodayTotal">0.00</span></span>
+                        <span style="color:#94a3b8;font-size:12px;">共 <span id="expenseTodayCount">0</span> 笔</span>
+                    </div>
                     <div style="border:1px solid rgba(148,163,184,0.1);border-radius:10px;overflow:hidden;">
                         <div style="display:grid;grid-template-columns:40px 1fr 1.2fr 1fr 1fr 2fr 1fr;padding:12px 16px;background:rgba(30,41,59,0.6);border-bottom:1px solid rgba(148,163,184,0.15);font-size:12px;color:#94a3b8;font-weight:600;scrollbar-gutter:stable;box-sizing:border-box;">
                             <div style="display:flex;align-items:center;justify-content:center;"><input type="checkbox" id="selectAllExpense" onchange="toggleSelectAllExpense()" style="cursor:pointer;"></div><div style="text-align:center;">序号</div><div style="text-align:center;">分类</div><div style="text-align:center;">金额</div><div style="text-align:center;">日期</div><div style="text-align:left;padding-left:8px;">备注</div><div style="text-align:center;">操作</div>
@@ -3687,12 +3725,12 @@
                     <div id="expensePagination" style="display:flex;justify-content:center;align-items:center;gap:6px;margin-top:16px;flex-wrap:wrap;"></div>
                 </div>
             `;
-            expenseMonthFilter = defaultMonth;
+            expenseDateFilter = defaultDate;
             loadExpenses();
         }
 
-        function filterExpenseByMonth() {
-            expenseMonthFilter = document.getElementById('expenseMonthFilter').value;
+        function filterExpenseByDate() {
+            expenseDateFilter = document.getElementById('expenseDateFilter').value;
             expenseCurrentPage = 1;
             loadExpenses();
         }
@@ -3704,10 +3742,10 @@
         }
 
         function resetExpenseFilter() {
-            const now = new Date();
-            expenseMonthFilter = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+            const today = todayLocalISO();
+            expenseDateFilter = today;
             expenseCategoryFilter = '';
-            document.getElementById('expenseMonthFilter').value = expenseMonthFilter;
+            document.getElementById('expenseDateFilter').value = today;
             document.getElementById('expenseCategoryFilter').value = '';
             expenseCurrentPage = 1;
             loadExpenses();
@@ -3718,7 +3756,9 @@
             document.getElementById('expenseForm').reset();
             document.getElementById('expenseId').value = '';
             document.getElementById('expenseModalTitle').textContent = '新增消费记录';
-            _$('expenseDate').value = new Date().toISOString().slice(0, 10);
+            if (!id) {
+                _$('expenseDate').value = todayLocalISO();
+            }
             if (id) {
                 const r = expenseData.find(x => x.id === id);
                 if (r) {
@@ -3874,16 +3914,13 @@
                     body = JSON.stringify({ ids: Array.from(selectedExpenseIds) });
                     if (!confirm(`确定要导出选中的 ${selectedExpenseIds.size} 条记录吗？`)) return;
                 } else {
-                    // 如果没有选中，导出当前月份的记录
-                    if (!expenseMonthFilter) {
-                        const now = new Date();
-                        expenseMonthFilter = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
-                    }
-                    url += `?month=${expenseMonthFilter}`;
+                    // 如果没有选中，导出当前所选日期的记录
+                    if (!expenseDateFilter) expenseDateFilter = todayLocalISO();
+                    url += `?date=${encodeURIComponent(expenseDateFilter)}`;
                     if (expenseCategoryFilter) {
                         url += `&category=${encodeURIComponent(expenseCategoryFilter)}`;
                     }
-                    if (!confirm(`确定要导出 ${expenseMonthFilter} 的消费记录吗？`)) return;
+                    if (!confirm(`确定要导出 ${expenseDateFilter} 的消费记录吗？`)) return;
                 }
 
                 if (exportBtn) {
@@ -3945,6 +3982,7 @@
                 if (el) el.textContent = '加载失败';
             }
         }
+
 
         function showExpenseStats() {
             window.scrollTo(0, 0);
@@ -4560,7 +4598,7 @@
             _$('overtimeDuration').value = '';
             document.getElementById('overtimeDurationHint').textContent = '自动计算';
             if (!id) {
-                _$('overtimeDate').value = new Date().toISOString().slice(0, 10);
+                _$('overtimeDate').value = todayLocalISO();
             }
             onOvertimeTypeChange();
             if (id) {

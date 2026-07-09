@@ -1709,17 +1709,18 @@ def get_expenses():
     page, page_size = clamp_pagination(
         request.args.get('page', 1, type=int),
         request.args.get('page_size', 5, type=int))
-    month = request.args.get('month', '', type=str)
+    date = request.args.get('date', '', type=str)
     category = request.args.get('category', '', type=str)
     offset = (page - 1) * page_size
 
     conditions = ['user_id = ?']
     params = [g.user_id]
-    if month:
-        m_start, m_end = _month_to_range(month)
-        if m_start and m_end:
-            conditions.append('date >= ? AND date < ?')
-            params.extend([m_start, m_end])
+    if date:
+        date_err = validate_date(date)
+        if date_err:
+            return date_err
+        conditions.append('date = ?')
+        params.append(date)
     if category:
         conditions.append('category = ?')
         params.append(category)
@@ -1763,15 +1764,16 @@ def export_expenses():
             cursor.execute(f"SELECT id, category, amount, remark, date FROM expenses WHERE id IN ({placeholders}) AND user_id = ? ORDER BY date DESC", params)
             rows = cursor.fetchall()
         else:
-            month = request.args.get('month', '')
+            date = request.args.get('date', '')
             category = request.args.get('category', '')
             conditions = ['user_id = ?']
             params = [g.user_id]
-            if month:
-                m_start, m_end = _month_to_range(month)
-                if m_start and m_end:
-                    conditions.append('date >= ? AND date < ?')
-                    params.extend([m_start, m_end])
+            if date:
+                date_err = validate_date(date)
+                if date_err:
+                    return date_err
+                conditions.append('date = ?')
+                params.append(date)
             if category:
                 conditions.append('category = ?')
                 params.append(category)
@@ -2044,6 +2046,32 @@ def get_expenses_stats():
         categories.append({'category': row['category'], 'amount': round(total, 2), 'percentage': pct})
 
     return jsonify({'categories': categories, 'grand_total': round(grand_total, 2)})
+
+
+@app.route('/api/expenses/today', methods=['GET'])
+@login_required
+def get_expenses_today():
+    """返回指定日期（默认当日）的消费合计。日期由前端传入本地 YYYY-MM-DD。"""
+    date = request.args.get('date', '', type=str).strip()
+    if not date:
+        date = datetime.now().strftime('%Y-%m-%d')
+    date_err = validate_date(date)
+    if date_err:
+        return date_err
+
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute(
+        'SELECT COUNT(*) as cnt, COALESCE(SUM(amount), 0) as total '
+        'FROM expenses WHERE user_id = ? AND date = ?',
+        (g.user_id, date)
+    )
+    row = cursor.fetchone()
+    return jsonify({
+        'date': date,
+        'count': row['cnt'],
+        'total': round(row['total'], 2)
+    })
 
 
 @app.route('/api/expenses/stats/monthly', methods=['GET'])

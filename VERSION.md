@@ -2,12 +2,30 @@
 
 ## 当前版本
 
-**v2.5.5**
+**v2.5.7**
 
 ---
 
 ## 版本历史
 
+---
+
+### v2.5.7 - 2026-07-10
+
+#### 🔧 核心 Bug 修复
+- **修复 3 模块新建表单默认日期偏移（UTC 时区）**：猕猴桃订单、消费记录、加班记录的 `- `id 分支原本依赖 `new Date().toISOString().slice(0,10)` 赋默认日期——China 为 UTC+8，本地 08:00 前 `toISOString()` 仍返回昨天，导致"被选昨天后其他模块也显示昨天"的疑似跨模块污染。抽取 `todayLocalISO()` 本地时间构造器，三个模块统一调用，彻底消除 UTC 偏移。路径中已无 `toISOString().slice` 残留。
+
+#### 🆕 消费记录模块重构
+- **"月份"筛选 → "日消费"精确日期筛选**：`expenseMonthFilter` → `expenseDateFilter`，后端接口 `GET /api/expenses` 筛选参数由 `month`(`substr` 月度范围) 改为 `date = ?`（精确到日，经 `validate_date` 校验），导出接口同步适配，UI 改为 `type="date"` 控件。
+- **新增当日合计能力**：独立后端接口 `GET /api/expenses/today?date=` 返回 `{date, count, total}`，无视分页对目标日期做 `COUNT/SUM`（`user_id` 隔离）；前端列表顶端"合计"栏随行所选日期刷新（错误时显示"加载失败/-"而非静默 0）。
+- **侧边栏"消费统计"保留**：月度/趋势视图与日视图互补，非重复。
+
+#### 📚 经验沉淀
+- `Bug #8/#13/#14` 沉淀至 `docs/BUG_FIX_LESSONS.md`，覆盖：UTC 时区判别法 + `toISOString` 关键词扫描、残存进程 404 排查（`netstat`+`tasklist`+`taskkill`）、误删模块回滚与需求确认原则。
+
+#### 🔍 验证
+- 端到端自测 8 项全 PASS（日期筛选跨天隔离、无参=全量、导出 GBK 行数、摘要 cross-user 隔离、非法日期 400、未授权 401）。
+- 北京 06:00（UTC+8 跨日窗口）+ 14:00 双时段本地日期构造正确性验证 PASS。
 
 ---
 

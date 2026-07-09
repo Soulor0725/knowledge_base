@@ -1,6 +1,6 @@
 # Echo 系统升级 Bug 修复经验沉淀
 
-> 从 Git 历史中提取，覆盖 v2.1.0 → v2.5.4 全部修复提交。目标：让同样的 bug 不再出现，让排查路径可复用。
+> 从 Git 历史中提取，覆盖 v2.1.0 → v2.5.7 全部修复提交。目标：让同样的 bug 不再出现，让排查路径可复用。
 
 ---
 
@@ -117,21 +117,70 @@
   - 所有"打开时修改 body 样式"的代码，必须在**所有关闭路径**（点击遮罩、ESC、登录成功、注册成功、点X）都还原
   - 搜索技巧：搜 `overflow = 'hidden'` → 确认对称位置有清空
 
-### 🔴 Bug #8：新建记录默认日期缺失
+### 🔴 Bug #8：新建记录默认日期缺失 → 修复引入 UTC 时区回归
 
-- **版本**：v2.5.4
-- **现象**：猕猴桃订单、加班记录的日期输入框为空，要手动选
-- **根因**：新建逻辑没填默认值，编辑逻辑也没处理 `!id` 分支
-- **修复**：
+- **版本**：v2.5.4（初修）/ v2.5.7（回归修复）
+- **v2.5.4 现象**：猕猴桃订单、加班记录、消费记录的日期输入框为空，要手动选
+- **v2.5.4 根因**：新建逻辑没填默认值，编辑逻辑也没处理 `!id` 分支
+- **v2.5.4 修复（有缺陷）**：
   ```javascript
+  // ❌ 有缺陷的写法 —— toISOString() 返回 UTC 日期
   if (!id) {
       _$('kiwiOrderDate').value = new Date().toISOString().slice(0, 10);
-      _$('overtimeDate').value = new Date().toISOString().slice(0, 10);
+      _$('overtimeDate').value   = new Date().toISOString().slice(0, 10);
   }
+  _$('expenseDate').value = new Date().toISOString().slice(0, 10); // 消费记录
+  ```
+- **v2.5.7 回归现象**：北京时间 00:00–07:59 新建记录时，默认日期显示为**昨天**。任选一个模块选昨天后，其他模块新建也变成昨天（看似"跨模块污染"，实为三处独立的同一个错误写法各自算出同一个错误结果）
+- **v2.5.7 根因**：`Date.prototype.toISOString()` 返回 **UTC** 日期，不返回本地日期。中国在 UTC+8，本地 08:00 前 UTC 时钟仍指向前一天 → `slice(0,10)` 截出的是昨天
+- **v2.5.7 修复**：统一抽取本地时间构造器，替换全部 `toISOString` 用法
+  ```javascript
+  /** 本地时间 YYYY-MM-DD（禁止使用 toISOString） */
+  function todayLocalISO(d = new Date()) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+  }
+  // 三个模块统一调用
+  _$('kiwiOrderDate').value = todayLocalISO();
+  _$('expenseDate').value    = todayLocalISO();
+  _$('overtimeDate').value   = todayLocalISO();
   ```
 - **教训**：
-  - 日期字段的新建表单**必须**默认 `new Date()`，减少用户操作
-  - 所有"新建"入口都要补，不能只改一个模块
+  - 日期字段的新建表单**必须**默认当天本地日期，减少用户操作；所有"新建"入口都要补
+  - **判别法**：`toISOString()` 只用于需要 UTC ISO 格式的场景（如 API 线传）；凡是给人看的日历日期，一律用 `getFullYear() / getMonth() / getDate()` 或封装好的本地构造器
+  - 同一段"取今天"逻辑不要 copy-paste 三份 → 抽成单一函数，从源头消灭不一致
+  - 搜索关键词：`toISOString().slice` → 逐一人眼复核是否该用本地时间
+
+### 🔴 Bug #13：消费记录列表月份筛选改造为"日消费" + 新增当日合计
+
+- **版本**：v2.5.7
+- **现象**：消费记录列表仅支持"月份"（YYYY-MM）筛选；列表与侧边栏"消费统计"页面功能部分重复；用户希望**按具体某天**查看并在列表区展示所选日期合计
+- **根因**：原列表接口 `GET /api/expenses` 只接受 `month` 参数配合 `substr()` 做月度范围匹配，没有"精确到天"的筛选维度；且无独立的"当日合计"接口，前端列表页无法在不翻页全量拉取的前提下给出可靠汇总
+- **修复**：
+  - 接口层：`GET /api/expenses` 的筛选参数由 `month` 改为 `date`（精确匹配 `date = ?`，经 `validate_date` 校验），兼容不传参=返回全部；导出接口 `/api/expenses/export` 同步改为 `?date=`；侧边栏保留"消费统计"（月度视图与列表日视图互补，非重复）
+  - 新增独立聚合接口 `GET /api/expenses/today?date=`：返回 `{date, count, total}`，**无视分页**地对目标日期做 `COUNT/SUM`，`user_id` 隔离，`date` 缺失时默认本地当天
+  - 前端层：
+    - `expenseMonthFilter` → `expenseDateFilter`，默认 `todayLocalISO()`（复用 Bug #8 构造器，不再引入新 UTC 路径）
+    - UI 标签"月份"→"日消费"，控件由 `type="month"` 改为 `type="date"`
+    - 列表页顶端新增"合计"栏，调用 `/api/expenses/today` 跟随所选日期刷新，文案"合计：¥xxx / 共 n 笔"
+    - 错误反馈由静默显示 `0.00 / 0` 改为 `加载失败 / -`，避免与"真实零消费"混淆
+- **踩坑经验（生产环境）**：
+  - 用户"已重启但接口仍 404"：**旧进程未真正退出**。Git Bash 下 `start "Echo" python app.py` 不可靠，进程树残留导致 5001 仍由旧实例监听 → 返回 404 `{"error":"资源不存在"}`。正确查证法：`netstat -ano | grep 5001` 拿到 PID，`tasklist | grep python` 交叉核对，必要时 `taskkill //F //PID <id>`。前端不应静默吞错（会误导为"零数据"）
+  - 接口命名：`/api/expenses/today` 名字暗示"今日"但实际接受任意 `date`，初次误解为写死今天。更合适的命名是 `/api/expenses/daily?date=`，但若改动路径需同步更新前端 + 测试，视为后续重构项
+  - 跨模块协同：日期相关改造同时涉及 `static/index.html` 3 处表单、3 处列表筛选、1 处导出 + 后端 2 个接口。全部改完后必须用真实数据跨 08:00 前后跑一遍（China UTC+8 时区陷阱）
+
+### 🔴 Bug #14：删除"消费统计"侧边栏引发误删回滚
+
+- **版本**：v2.5.7
+- **现象**：用户原话"消费记录页面月份统计和消费统计模块功能重复"被误读为"删除消费统计模块"整块删除，用户明确要求找回
+- **根因**：需求语句歧义——"重复"是指"列表月筛选 + 统计页的月度视图存在重叠"，可优化整合，但**不是删除整个模块**
+- **修复**：立即从 `git show HEAD:static/index.html` 还原 `showExpenseStats` 全量子函数（269 行）+ 侧边栏入口
+- **教训**：
+  - **删除模块级功能前，必须 AskUserQuestion 确认范围**，不能按字面直接删除
+  - 治理重复的正确路径：让两者差异化（列表=日视图，统计=月/趋势视图），而非简单删除
+  - 大型删除前先 `wc -l` 确认影响面，并提醒用户"即将删除 N 行"
 
 ---
 
