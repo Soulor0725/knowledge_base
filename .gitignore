@@ -30,8 +30,13 @@ __pycache__/
 # 忽略 CodeBuddy 指南（非启动所需）
 CODEBUDDY.md
 
+# Claude Code 配置与状态（不入库）
+.claude/
+
 # 备份与临时脚本（不入库）
 *.bak
 fix_*.py
 _*.py
 .patch_*.ps1
+.tmp_patch.txt
+SESSION_CHECKPOINT.md
