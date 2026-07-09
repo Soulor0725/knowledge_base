@@ -1104,6 +1104,9 @@ def _validate_kiwi_sale_data(data):
         'payment_amount': payment_amount,
         'status': status,
     }
+
+@app.route("/api/kiwi-sales", methods=["GET"])
+@login_required
 def get_kiwi_sales():
     db = get_db()
     cursor = db.cursor()
