@@ -1,8 +1,8 @@
-# AGENTS.md — Echo v2.5.2
+# AGENTS.md — Echo v2.5.7
 
 ## Architecture
-- `app.py` (2069 lines): Flask monolith. Sections have `# ----` markers for grep.
-- `static/index.html` (~5676 lines): Vanilla JS SPA. `fetch()` → `/api`, Bearer JWT in `localStorage.token`.
+- `app.py` (2145 lines): Flask monolith. Sections have `# ----` markers for grep. **Planned split into 11 files** (see `.mimocode/plans/1783756811019-kind-island.md`).
+- `static/index.html` (~5995 lines): Vanilla JS SPA. `fetch()` → `/api`, Bearer JWT in `localStorage.token`.
 - `knowledge_base.db`: SQLite, created by `init_db()` (only in `if __name__ == '__main__'`).
 
 ## Commands
@@ -17,14 +17,14 @@ python test_api.py               # smoke test, server must run on localhost:5001
 | Section | Marker at | Grep command |
 |---------|-----------|-------------|
 | Imports + error handlers + cache | L1 | `Select-String -Path app.py -Pattern "def bad_request"` |
-| DB + auth utils | L82 | `Select-String "# ---- DB"` |
-| init_db (schema) | L170 | `Select-String "# ---- init_db"` |
-| Auth (register/login/me) | L322 | `Select-String "# ---- Auth"` |
-| Articles + cats + tags | L547 | `Select-String "# ---- Articles"` |
-| Upload | L953 | `Select-String "# ---- Upload"` |
-| Kiwi sales | L982 | `Select-String "# ---- Kiwi"` |
-| Overtime | L1375 | `Select-String "# ---- Overtime"` |
-| Expenses | L1676 | `Select-String "# ---- Expenses"` |
+| DB + auth utils | L143 | `Select-String "# ---- DB"` |
+| init_db (schema) | L230 | `Select-String "# ---- init_db"` |
+| Auth (register/login/me) | L382 | `Select-String "# ---- Auth"` |
+| Articles + cats + tags | L648 | `Select-String "# ---- Articles"` |
+| Upload | L1013 | `Select-String "# ---- Upload"` |
+| Kiwi sales | L1042 | `Select-String "# ---- Kiwi"` |
+| Overtime | L1394 | `Select-String "# ---- Overtime"` |
+| Expenses | L1719 | `Select-String "# ---- Expenses"` |
 
 **Navigate**: `Select-String -Path app.py -Pattern "# ----"` lists all sections.
 
@@ -112,6 +112,12 @@ python test_api.py               # smoke test, server must run on localhost:5001
 - **修复**: 在 `add_cache_headers` 中添加 `X-Content-Type-Options: nosniff` 和 `X-Frame-Options: DENY`
 - **规则**: 所有 HTTP 响应**必须**包含 `X-Content-Type-Options: nosniff` 和 `X-Frame-Options: DENY`
 
+### 2026-07-11 await await 双重等待
+- **现象**: 修复 XSS 时批量替换引入了 `await await Promise.all(...)`，语法正确但语义冗余
+- **根因**: 批量 replace 操作时未验证 JavaScript 语义
+- **修复**: 移除多余的 `await`（3处：L5600/5633/5698）
+- **规则**: 批量修改代码后必须验证语法和语义正确性
+
 ## 架构风险预警
 ### 并发安全
 - 全局 `dict`（`login_attempts`, `_stats_cache` 等）在 `threaded=True` 下**必须加锁**，否则并发读写会崩溃
@@ -140,3 +146,17 @@ python test_api.py               # smoke test, server must run on localhost:5001
 
 ## 语言偏好
 - **所有回复使用中文**，包括代码注释、错误说明、进度更新。
+
+## Obsidian 知识库同步
+- 文档位于 `docs/` 目录，使用 Obsidian 管理
+- **代码变更时**：更新 `docs/modules/` 对应模块文档
+- **Bug 修复后**：在 `docs/bugs/` 记录根因和修复
+- **架构变更时**：更新 `docs/architecture/`
+- **新功能**：更新对应模块文档的 API 接口表
+- **配置变更**：更新 `docs/guides/` 相关文档
+- 使用 `[[]]` 链接相关文档，保持知识库互联
+
+## 每次改动完成后的流程
+1. **同步知识库文档** - 更新 `docs/modules/` 对应文档
+2. **更新 README.md** - 同步功能特性和版本说明
+3. **升级版本号** - 更新 `VERSION.md` 和 `README.md` 中的版本号
