@@ -197,42 +197,86 @@ auto_start.bat
 
 ```
 knowledge_base/
-├── app.py                     # Flask 入口（138行）
+├── app.py                     # Flask 入口（139行）
 ├── config.py                  # 配置常量
-├── db.py                      # 数据库管理
-├── auth_utils.py              # 认证工具
+├── db.py                      # 数据库管理（init_db / get_db）
+├── auth_utils.py              # 认证工具（JWT / login_required）
 ├── utils.py                   # 通用工具函数
-├── cache.py                   # 缓存系统
-├── routes/                    # 路由模块
-│   ├── __init__.py            # 蓝图定义
+├── cache.py                   # 缓存系统（thread-safe）
+├── routes/                    # 路由模块（Blueprint 星型拓扑）
+│   ├── __init__.py            # 蓝图定义（12行）
 │   ├── auth.py                # 认证路由（185行）
 │   ├── articles.py            # 文章路由（420行）
-│   ├── kiwi_sales.py          # 猕猴桃销售路由（305行）
-│   ├── overtime.py            # 加班记录路由（280行）
-│   └── expenses.py            # 记账路由（275行）
+│   ├── kiwi_sales.py          # 猕猴桃销售路由（421行）
+│   ├── overtime.py            # 加班记录路由（334行）
+│   └── expenses.py            # 消费记录路由（352行）
 ├── static/
-│   ├── index.html             # 前端界面（单文件 SPA，~6000 行）
+│   ├── index.html             # 前端单文件 SPA（~6000 行）
 │   ├── favicon.ico
-│   └── uploads/               # 用户上传的图片
-├── docs/                      # Obsidian 知识库
-│   ├── index.md               # 首页
-│   ├── architecture/          # 架构文档
-│   ├── decisions/             # 决策记录（ADR）
-│   ├── modules/               # 模块文档
-│   ├── guides/                # 开发指南
-│   └── templates/             # 文档模板
-├── .obsidian/                 # Obsidian 配置
-├── tests/                     # 测试文件
+│   └── uploads/               # 用户上传的图片（png/jpg/webp）
+├── docs/                      # Obsidian 知识库（已 git 追踪）
+│   ├── index.md               # 知识库首页
+│   ├── ARCHITECTURE.md        # 架构总览（34KB）
+│   ├── PRD.md                 # 产品需求文档（37KB）
+│   ├── INTERACTION_DESIGN.md  # 交互设计（18KB）
+│   ├── BUG_FIX_LESSONS.md     # Bug 修复经验沉淀（17KB）
+│   ├── AUDIT_REPORT.md        # 审计报告（16KB）
+│   ├── ALIYUN_DEPLOY.md       # 阿里云部署指南
+│   ├── PLAYWRIGHT_SETUP.md    # E2E 测试搭建
+│   ├── TOKENT_*.md            # Token 优化系列（3 篇）
+│   ├── TEST_*.md              # 测试优化系列（2 篇）
+│   ├── architecture/          # 架构图集（overview）
+│   ├── modules/               # 模块文档（auth/articles/kiwi/overtime/expenses）
+│   ├── decisions/             # 决策记录 ADR（001-flask / 002-sqlite）
+│   ├── guides/                # 开发指南（setup/coding-standards/deployment）
+│   ├── templates/             # 文档模板（ADR/Bug/模块/会议）
+│   ├── bugs/                  # Bug 归档
+│   ├── meetings/              # 会议记录
+│   └── research/              # 技术调研
+├── .obsidian/                 # Obsidian vault 配置（本地，gitignore）
+│   ├── plugins/obsidian-git/  # Git 自动同步插件 v2.38.6
+│   └── data.json              # 自动 commit+push 配置
+├── tests/                     # pytest 测试套件
+│   ├── conftest.py            # 共享 fixture
+│   ├── test_security.py       # 安全测试
+│   ├── test_performance.py    # 性能测试
+│   ├── test_smoke.py          # P0 冒烟
+│   ├── test_utils.py          # 工具测试
+│   └── test_fault_tolerance.py # 容错测试
+├── scripts/                   # 辅助脚本
+│   ├── generate_api_test_excel.py
+│   ├── generate_test_excel.py
+│   └── generate_merged_excel.py
+├── .github/                   # GitHub 配置（copilot / workflows）
 ├── knowledge_base.db          # SQLite 数据库（运行时生成）
 ├── requirements.txt           # Python 依赖
+├── CLAUDE.md                  # Claude Code 项目约束
 ├── AGENTS.md                  # AI 协作指引
-├── README.md                  # 项目文档
-└── VERSION.md                 # 版本管理文档
+├── CODE_QUALITY_REPORT.md     # 代码质量报告
+├── PERFORMANCE_AUDIT.md       # 性能审计报告
+├── RELEASE_NOTES.md           # 发布说明（v2.1→v2.2）
+├── VERSION.md                 # 完整版本历史（v1.0→v2.5.8）
+├── start.bat / auto_start.bat # Windows 启动脚本
+├── deploy.sh / update.sh      # 部署脚本
+├── smoke_test.py              # 快速冒烟测试
+├── locustfile.py              # Locust 压测脚本
+└── test_*.py                  # 根目录测试脚本
 ```
+
+## 🔄 自动同步
+
+通过 Obsidian **Git 插件**（obsidian-git v2.38.6）实现知识库自动版本控制：
+
+- **触发**：每 5 分钟自动 commit，每 30 分钟自动 push
+- **远端**：`https://github.com/Soulor0725/knowledge_base.git`（master 分支）
+- **范围**：整个仓库（代码 + docs/ 文档统一提交）
+- **提示**：状态栏图标 + toast 通知（commit/push/pull/冲突）
+- **配置**：`.obsidian/plugins/obsidian-git/data.json`
 
 ## 📝 版本历史
 
-详细版本历史请查看 [VERSION.md](VERSION.md) 和 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
+完整版本历史请查看 [VERSION.md](VERSION.md)（v1.0.0 → v2.5.8）。
+发布说明（v2.1.0 → v2.2.1）另见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
 
 ## 🔧 配置说明
 

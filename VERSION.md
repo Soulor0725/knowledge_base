@@ -52,6 +52,13 @@
 - 创建架构文档和决策记录（ADR）
 - 添加模板系统（ADR、Bug、模块、会议）
 - 配置快捷键和编辑器设置
+- **安装 obsidian-git v2.38.6 插件 + 自动备份配置**
+  - 自动 commit 间隔：5 分钟（`vault backup: YYYY-MM-DD HH:mm:ss`）
+  - 自动 push 间隔：30 分钟（→ GitHub `Soulor0725/knowledge_base` master）
+  - 启动时自动 pull；push 前先 pull（避免冲突）
+  - 状态栏图标 + toast 通知（commit/push/pull/冲突提示）
+  - 仓库根目录（vault 根）即 git 根，代码 + docs/ 统一版本化
+  - `.obsidian/` 配置目录加入 gitignore（仅本地，不入库）
 
 ---
 
