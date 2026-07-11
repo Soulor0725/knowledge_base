@@ -1,0 +1,42 @@
+﻿
+
+@auth_bp.route('/change-password', methods=['POST'])
+@login_required
+def change_password():
+    """修改密码"""
+    data, err = safe_get_json()
+    if err:
+        return err
+    if not data:
+        return jsonify({'error': '请提供原密码和新密码'}), 400
+
+    old_password = data.get('old_password', '')
+    new_password = data.get('new_password', '')
+
+    if not old_password or not new_password:
+        return jsonify({'error': '原密码和新密码不能为空'}), 400
+
+    if len(new_password) < PASSWORD_MIN_LENGTH:
+        return jsonify({'error': f'新密码长度不能少于 {PASSWORD_MIN_LENGTH} 个字符，且需包含大写字母、小写字母和数字'}), 400
+    if not re.search(r'[A-Z]', new_password) or not re.search(r'[a-z]', new_password) or not re.search(r'\d', new_password):
+        return jsonify({'error': '新密码必须同时包含大写字母、小写字母和数字'}), 400
+
+    if old_password == new_password:
+        return jsonify({'error': '新密码不能与原密码相同'}), 400
+
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("SELECT password FROM users WHERE id = ?", (g.user_id,))
+    row = cursor.fetchone()
+    if not row:
+        return jsonify({'error': '用户不存在'}), 404
+
+    if not pbkdf2_sha256.verify(old_password, row["password"]):
+        return jsonify({'error': '原密码错误'}), 401
+
+    hashed_password = pbkdf2_sha256.hash(new_password)
+    cursor.execute("UPDATE users SET password = ? WHERE id = ?", (hashed_password, g.user_id))
+    safe_commit(db)
+
+    logger.info('user %d changed password', g.user_id)
+    return jsonify({'message': '密码修改成功'}), 200

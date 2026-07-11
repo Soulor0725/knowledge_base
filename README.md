@@ -5,8 +5,8 @@
 
 ## 当前版本
 
-**v2.5.7**
-> 关键修复：3 模块新建表单默认昨天(UTC 时区偏移)、消费记录"月份→日消费"精确筛选 + 新增独立当日合计接口；新增 Bug #8/#13/#14 经验沉淀（含误删模块回滚 + 残存进程 404 排查）。详见 docs/BUG_FIX_LESSONS.md
+**v2.5.8**
+> 架构重构：app.py 从 2145 行拆分为 11 个模块（减少 93%）；新增自定义时间选择器；修复代码质量问题；搭建 Obsidian 知识库。
 
 ## ✨ 功能特性
 
@@ -59,6 +59,7 @@
 
 ### ⏰ 加班管理模块
 - **加班记录**：支持平时加班（19:00-23:59）和周末加班（09:00-23:00）
+- **自定义时间选择器**：下拉框选择小时/分钟，横线分隔显示，完美适配深色主题
 - **时长计算**：自动计算加班时长，支持手动修改
 - **月度统计**：按自然月统计平时/周末加班时长和记录数
 - **周期统计**：按上月21日至本月20日周期统计加班时长
@@ -67,12 +68,13 @@
 
 ## 🛠️ 技术栈
 
-- **后端**：Python Flask
-- **前端**：HTML5, CSS3, JavaScript
-- **数据库**：SQLite
+- **后端**：Python Flask（模块化架构，Blueprint）
+- **前端**：HTML5, CSS3, JavaScript（SPA）
+- **数据库**：SQLite（WAL 模式）
 - **Markdown 解析**：Marked.js
-- **代码高亮**：CodeMirror
+- **代码高亮**：CodeMirror + highlight.js
 - **图标**：Font Awesome
+- **知识库**：Obsidian
 
 ## 📦 安装步骤
 
@@ -195,31 +197,37 @@ auto_start.bat
 
 ```
 knowledge_base/
-├── app.py                     # 后端主文件（Flask，所有路由和业务逻辑，~1630 行）
+├── app.py                     # Flask 入口（138行）
+├── config.py                  # 配置常量
+├── db.py                      # 数据库管理
+├── auth_utils.py              # 认证工具
+├── utils.py                   # 通用工具函数
+├── cache.py                   # 缓存系统
+├── routes/                    # 路由模块
+│   ├── __init__.py            # 蓝图定义
+│   ├── auth.py                # 认证路由（185行）
+│   ├── articles.py            # 文章路由（420行）
+│   ├── kiwi_sales.py          # 猕猴桃销售路由（305行）
+│   ├── overtime.py            # 加班记录路由（280行）
+│   └── expenses.py            # 记账路由（275行）
 ├── static/
-│   ├── index.html             # 前端界面（单文件 SPA，~5940 行）
+│   ├── index.html             # 前端界面（单文件 SPA，~6000 行）
 │   ├── favicon.ico
-│   └── uploads/               # 用户上传的图片（已 gitignore）
-├── docs/                      # 架构图、PRD、Bug修复经验、TOKEN优化等文档
-├── .github/
-│   └── workflows/
-│       └── playwright.yml     # Playwright E2E 测试 CI
-├── knowledge_base.db          # SQLite 数据库（运行时生成，已 gitignore）
+│   └── uploads/               # 用户上传的图片
+├── docs/                      # Obsidian 知识库
+│   ├── index.md               # 首页
+│   ├── architecture/          # 架构文档
+│   ├── decisions/             # 决策记录（ADR）
+│   ├── modules/               # 模块文档
+│   ├── guides/                # 开发指南
+│   └── templates/             # 文档模板
+├── .obsidian/                 # Obsidian 配置
+├── tests/                     # 测试文件
+├── knowledge_base.db          # SQLite 数据库（运行时生成）
 ├── requirements.txt           # Python 依赖
 ├── AGENTS.md                  # AI 协作指引
-├── CLAUDE.md                  # Claude Code 指引
 ├── README.md                  # 项目文档
-├── VERSION.md                 # 版本管理文档
-├── RELEASE_NOTES.md           # 发布说明文档
-├── start.bat                  # Windows 启动脚本
-├── auto_start.bat             # 自动启动脚本
-├── setup_autostart.ps1        # Windows 自启动配置脚本
-├── deploy.sh                  # 云服务器部署脚本
-├── update.sh                  # 云服务器更新脚本
-├── test_api.py                # 接口冒烟测试
-├── check_db.py                # 数据库检查工具
-├── list_tables.py             # 数据库表结构查看工具
-└── query_tables.py            # 数据库查询工具
+└── VERSION.md                 # 版本管理文档
 ```
 
 ## 📝 版本历史
@@ -228,22 +236,23 @@ knowledge_base/
 
 ## 🔧 配置说明
 
+### 环境变量
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| SECRET_KEY | JWT 密钥 | 随机生成 |
+
 ### 端口配置
 
-默认端口为 5001，可在 `app.py` 文件中修改：
-
-```python
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5001, debug=True)
-```
+默认端口为 5001，可在 `app.py` 中修改。
 
 ### 数据库配置
 
-默认使用 SQLite 数据库，数据库文件为 `knowledge_base.db`。
+默认使用 SQLite 数据库，数据库文件为 `knowledge_base.db`，配置在 `config.py` 中。
 
 ### 分页配置
 
-各模块分页默认每页5条，可在 `static/index.html` 中修改对应 `pageSize` 变量（如 `kiwiReportPageSize`、`expensePageSize`）。
+各模块分页默认每页5条，可配置在 `config.py` 中。
 
 
 ## 安全修复 (v2.5.5)

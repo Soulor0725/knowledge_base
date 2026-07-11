@@ -1460,6 +1460,54 @@
                 padding: 20px;
             }
         }
+
+        /* 自定义时间选择器 */
+        .time-picker {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(30, 41, 59, 0.8);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            border-radius: 8px;
+            padding: 8px 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .time-picker:hover {
+            border-color: rgba(96, 165, 250, 0.5);
+            background: rgba(30, 41, 59, 0.95);
+        }
+        .time-picker:focus-within {
+            border-color: #60a5fa;
+            box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.2);
+        }
+        .time-picker-icon {
+            color: #60a5fa;
+            font-size: 14px;
+        }
+        .time-picker select {
+            background: transparent;
+            border: none;
+            color: #cbd5e1;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            outline: none;
+            padding: 0;
+        }
+        .time-picker select option {
+            background: #1e293b;
+            color: #cbd5e1;
+            padding: 8px;
+        }
+        .time-picker-separator {
+            color: #60a5fa;
+            font-weight: 600;
+            font-size: 16px;
+            width: 12px;
+            text-align: center;
+            display: inline-block;
+        }
     </style>
 </head>
 <body>
@@ -1630,6 +1678,27 @@
                     <button type="submit" class="btn btn-primary">保存</button>
                 </div>
             </form>
+            <!-- 修改密码区域 -->
+            <div style="border-top: 1px solid #334155; padding-top: 16px; margin-top: 16px;">
+                <h3 style="font-size: 14px; color: #94a3b8; margin-bottom: 12px;">修改密码</h3>
+                <form id="changePasswordForm" onsubmit="changePassword(event)">
+                    <div class="form-group">
+                        <label>原密码</label>
+                        <input type="password" id="oldPassword" required placeholder="请输入当前密码">
+                    </div>
+                    <div class="form-group">
+                        <label>新密码</label>
+                        <input type="password" id="newPassword" required placeholder="至少8位，含大小写字母和数字">
+                    </div>
+                    <div class="form-group">
+                        <label>确认新密码</label>
+                        <input type="password" id="confirmNewPassword" required placeholder="请再次输入新密码">
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-secondary">修改密码</button>
+                    </div>
+                </form>
+            </div>
         </div>
     </div>
 
@@ -1716,11 +1785,60 @@
                 <div class="form-group" style="display: flex; gap: 12px;">
                     <div style="flex:1;">
                         <label>开始时间</label>
-                        <input type="time" id="overtimeStartTime" required onchange="calcOvertimeDuration()">
+                        <div class="time-picker" onclick="toggleTimePicker(this)">
+                            <i class="fa fa-clock-o time-picker-icon"></i>
+                            <select class="time-hour" onchange="onTimeChange(this, 'overtimeStartTime')">
+                                <option value="">时</option>
+                                <option value="08">08</option>
+                                <option value="09">09</option>
+                                <option value="10">10</option>
+                                <option value="11">11</option>
+                                <option value="12">12</option>
+                                <option value="13">13</option>
+                                <option value="14">14</option>
+                                <option value="15">15</option>
+                                <option value="16">16</option>
+                                <option value="17">17</option>
+                                <option value="18">18</option>
+                                <option value="19">19</option>
+                                <option value="20">20</option>
+                                <option value="21">21</option>
+                                <option value="22">22</option>
+                                <option value="23">23</option>
+                            </select>
+                            <span class="time-picker-separator">-</span>
+                            <select class="time-minute" onchange="onTimeChange(this, 'overtimeStartTime')">
+                                <option value="">分</option>
+                                <option value="00">00</option>
+                                <option value="15">15</option>
+                                <option value="30">30</option>
+                                <option value="45">45</option>
+                            </select>
+                        </div>
+                        <input type="hidden" id="overtimeStartTime" required>
                     </div>
                     <div style="flex:1;">
                         <label>结束时间</label>
-                        <input type="time" id="overtimeEndTime" required onchange="calcOvertimeDuration()">
+                        <div class="time-picker" onclick="toggleTimePicker(this)">
+                            <i class="fa fa-clock-o time-picker-icon"></i>
+                            <select class="time-hour" onchange="onTimeChange(this, 'overtimeEndTime')">
+                                <option value="">时</option>
+                                <option value="19">19</option>
+                                <option value="20">20</option>
+                                <option value="21">21</option>
+                                <option value="22">22</option>
+                                <option value="23">23</option>
+                            </select>
+                            <span class="time-picker-separator">-</span>
+                            <select class="time-minute" onchange="onTimeChange(this, 'overtimeEndTime')">
+                                <option value="">分</option>
+                                <option value="00">00</option>
+                                <option value="15">15</option>
+                                <option value="30">30</option>
+                                <option value="45">45</option>
+                            </select>
+                        </div>
+                        <input type="hidden" id="overtimeEndTime" required>
                     </div>
                 </div>
                 <div class="form-group">
@@ -2200,7 +2318,63 @@
         }
 
         // 打开资料编辑模态框
-        function openProfileModal() {
+                // 修改密码
+        async function changePassword(event) {
+            event.preventDefault();
+            const oldPw = document.getElementById('oldPassword').value;
+            const newPw = document.getElementById('newPassword').value;
+            const confirmPw = document.getElementById('confirmNewPassword').value;
+
+            if (!oldPw || !newPw || !confirmPw) {
+                alert('请填写所有密码字段');
+                return;
+            }
+            if (newPw.length < 8) {
+                alert('新密码长度至少8位');
+                return;
+            }
+            var hasUpper = false, hasLower = false, hasDigit = false;
+            for (var i = 0; i < newPw.length; i++) {
+                var c = newPw.charAt(i);
+                if (c >= 'A' && c <= 'Z') hasUpper = true;
+                else if (c >= 'a' && c <= 'z') hasLower = true;
+                else if (c >= '0' && c <= '9') hasDigit = true;
+            }
+            if (!hasUpper || !hasLower || !hasDigit) {
+                alert('新密码必须同时包含大写字母、小写字母和数字');
+                return;
+            }
+            if (newPw !== confirmPw) {
+                alert('两次输入的新密码不一致');
+                return;
+            }
+            if (oldPw === newPw) {
+                alert('新密码不能与原密码相同');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/auth/change-password', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + localStorage.getItem('token')
+                    },
+                    body: JSON.stringify({ old_password: oldPw, new_password: newPw })
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || '修改失败');
+                }
+                alert('密码修改成功');
+                document.getElementById('changePasswordForm').reset();
+            } catch (error) {
+                console.error('修改密码失败:', error);
+                alert(error.message);
+            }
+        }
+
+function openProfileModal() {
             // 填充当前用户信息
             document.getElementById('profileUsername').value = user.username;
             document.getElementById('profileName').value = user.name || '';
@@ -4342,22 +4516,56 @@
 
         let isManualDuration = false;
 
+        // 自定义时间选择器函数
+        function toggleTimePicker(picker) {
+            // 阻止事件冒泡，避免触发其他点击事件
+            event.stopPropagation();
+        }
+
+        function onTimeChange(select, hiddenId) {
+            const picker = select.closest('.time-picker');
+            const hourSelect = picker.querySelector('.time-hour');
+            const minuteSelect = picker.querySelector('.time-minute');
+            const hour = hourSelect.value;
+            const minute = minuteSelect.value;
+            const hiddenInput = document.getElementById(hiddenId);
+
+            if (hour && minute) {
+                hiddenInput.value = `${hour}:${minute}`;
+            } else if (hour) {
+                hiddenInput.value = `${hour}:00`;
+            } else {
+                hiddenInput.value = '';
+            }
+            calcOvertimeDuration();
+        }
+
+        function setTimePickerValue(pickerId, timeValue) {
+            const picker = document.getElementById(pickerId);
+            if (!picker) return;
+            const hiddenInput = picker.querySelector('input[type="hidden"]');
+            const hourSelect = picker.querySelector('.time-hour');
+            const minuteSelect = picker.querySelector('.time-minute');
+
+            if (timeValue && timeValue.includes(':')) {
+                const [hour, minute] = timeValue.split(':');
+                hourSelect.value = hour;
+                minuteSelect.value = minute;
+                hiddenInput.value = timeValue;
+            } else {
+                hourSelect.value = '';
+                minuteSelect.value = '';
+                hiddenInput.value = '';
+            }
+        }
+
+        function getTimePickerValue(pickerId) {
+            const hiddenInput = document.getElementById(pickerId);
+            return hiddenInput ? hiddenInput.value : '';
+        }
+
         function onOvertimeTypeChange() {
             isManualDuration = false;
-            const type = _$('overtimeType').value;
-            const startEl = _$('overtimeStartTime');
-            const endEl = _$('overtimeEndTime');
-            if (type === 'weekday') {
-                startEl.removeAttribute('min');
-                startEl.removeAttribute('max');
-                endEl.min = '19:00';
-                endEl.max = '23:59';
-            } else {
-                startEl.min = '08:30';
-                startEl.max = '23:59';
-                endEl.min = '08:30';
-                endEl.max = '23:59';
-            }
             calcOvertimeDuration();
         }
 
@@ -4366,8 +4574,8 @@
             const hint = document.getElementById('overtimeDurationHint');
             if (hint) hint.textContent = '自动计算';
             const type = _$('overtimeType').value;
-            const start = _$('overtimeStartTime').value;
-            const end = _$('overtimeEndTime').value;
+            const start = getTimePickerValue('overtimeStartTime');
+            const end = getTimePickerValue('overtimeEndTime');
             const durationEl = _$('overtimeDuration');
             if (!end) { durationEl.value = ''; return; }
             let diffMin;
@@ -4562,6 +4770,9 @@
             document.getElementById('overtimeModalTitle').textContent = '新增加班记录';
             _$('overtimeDuration').value = '';
             document.getElementById('overtimeDurationHint').textContent = '自动计算';
+            // 重置时间选择器
+            setTimePickerValue('overtimeStartTime', '');
+            setTimePickerValue('overtimeEndTime', '');
             if (!id) {
                 _$('overtimeDate').value = todayLocalISO();
             }
@@ -4572,8 +4783,8 @@
                     document.getElementById('overtimeRecordId').value = r.id;
                     _$('overtimeType').value = r.overtime_type;
                     _$('overtimeDate').value = r.date;
-                    _$('overtimeStartTime').value = r.start_time;
-                    _$('overtimeEndTime').value = r.end_time;
+                    setTimePickerValue('overtimeStartTime', r.start_time);
+                    setTimePickerValue('overtimeEndTime', r.end_time);
                     _$('overtimeRemark').value = r.remark || '';
                     document.getElementById('overtimeModalTitle').textContent = '编辑加班记录';
                     onOvertimeTypeChange();
@@ -4597,8 +4808,8 @@
             const data = {
                 overtime_type: _$('overtimeType').value,
                 date: _$('overtimeDate').value,
-                start_time: _$('overtimeStartTime').value,
-                end_time: _$('overtimeEndTime').value,
+                start_time: getTimePickerValue('overtimeStartTime'),
+                end_time: getTimePickerValue('overtimeEndTime'),
                 remark: _$('overtimeRemark').value.trim()
             };
             const parsed = parseFloat(durationText);

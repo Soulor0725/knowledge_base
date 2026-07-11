@@ -2,11 +2,56 @@
 
 ## 当前版本
 
-**v2.5.7**
+**v2.5.8**
 
 ---
 
 ## 版本历史
+
+---
+
+### v2.5.8 - 2026-07-11
+
+#### 🏗️ 架构重构
+- **app.py 模块化拆分**：从 2145 行单文件拆分为 11 个模块，app.py 缩减至 138 行（减少 93%）
+  - `config.py` - 配置常量
+  - `db.py` - 数据库管理
+  - `auth_utils.py` - 认证工具
+  - `utils.py` - 通用工具函数
+  - `cache.py` - 缓存系统
+  - `routes/auth.py` - 认证路由
+  - `routes/articles.py` - 文章路由
+  - `routes/kiwi_sales.py` - 猕猴桃销售路由
+  - `routes/overtime.py` - 加班记录路由
+  - `routes/expenses.py` - 记账路由
+- **零循环依赖**：星型拓扑架构，所有模块 → 共享工具层
+- **Flask Blueprint**：每个业务模块一个独立蓝图
+
+#### 🎨 UI 优化
+- **自定义时间选择器**：替换原生 `input[type=time]`，使用下拉框选择小时/分钟
+  - 显示格式：`🕐 19 - 00`（横线分隔）
+  - 存储格式：`19:00`（冒号分隔，兼容后端）
+  - Font Awesome 时钟图标，主题色蓝色
+  - 完美匹配深色主题
+
+#### 📝 代码质量修复
+- 修复 `await await` 双重等待（3处）
+- 修复语法高亮 XSS 风险（2处）
+- 导出接口 ids 添加类型校验
+- views 自增改用 safe_commit
+- 清理 96 处 console.log
+- 提取通用 renderPaginationComponent() 消除 5 套重复分页逻辑
+- 提取 saveArticleCommon() 消除 saveArticle/saveDraft 重复
+- get_current_user 添加 None 检查
+- except Exception 添加日志记录（4处）
+- avatar/category 添加输入校验
+
+#### 📚 知识库搭建
+- 初始化 Obsidian 知识库结构
+- 创建模块文档（auth、articles、kiwi-sales、overtime、expenses）
+- 创建架构文档和决策记录（ADR）
+- 添加模板系统（ADR、Bug、模块、会议）
+- 配置快捷键和编辑器设置
 
 ---
 

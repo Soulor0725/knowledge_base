@@ -69,3 +69,62 @@ class TestSecurity:
         # 验证能正常读取（未被破坏）
         r2 = client.get(f'{BASE}/articles/{temp_article}', headers=auth)
         assert r2.status_code == 200
+
+    def test_change_password_wrong_old(self, client):
+        """原密码错误时修改失败"""
+        u = 'pwd_' + ''.join(__import__('random').choices(__import__('string').ascii_lowercase, k=6))
+        p = 'Test1234'
+        r = client.post(f'{BASE}/auth/register', json={'username': u, 'password': p, 'name': u})
+        if r.status_code != 201:
+            r = client.post(f'{BASE}/auth/login', json={'username': u, 'password': p})
+        token = r.json()['token']
+        headers = {'Authorization': f'Bearer {token}'}
+        # Wrong old password
+        r2 = client.post(f'{BASE}/auth/change-password', headers=headers,
+                         json={'old_password': 'WrongOldPass123', 'new_password': 'NewPass456'})
+        assert r2.status_code == 401
+        assert '\u539f\u5bc6\u7801' in r2.json().get('error', '')
+
+    def test_change_password_same_as_old(self, client):
+        """新密码与原密码相同应拒绝"""
+        u = 'pwd_' + ''.join(__import__('random').choices(__import__('string').ascii_lowercase, k=6))
+        p = 'Test1234'
+        r = client.post(f'{BASE}/auth/register', json={'username': u, 'password': p, 'name': u})
+        if r.status_code != 201:
+            r = client.post(f'{BASE}/auth/login', json={'username': u, 'password': p})
+        token = r.json()['token']
+        headers = {'Authorization': f'Bearer {token}'}
+        r2 = client.post(f'{BASE}/auth/change-password', headers=headers,
+                         json={'old_password': p, 'new_password': p})
+        assert r2.status_code == 400
+
+    def test_change_password_too_short(self, client):
+        """新密码太短应拒绝"""
+        u = 'pwd_' + ''.join(__import__('random').choices(__import__('string').ascii_lowercase, k=6))
+        p = 'Test1234'
+        r = client.post(f'{BASE}/auth/register', json={'username': u, 'password': p, 'name': u})
+        if r.status_code != 201:
+            r = client.post(f'{BASE}/auth/login', json={'username': u, 'password': p})
+        token = r.json()['token']
+        headers = {'Authorization': f'Bearer {token}'}
+        r2 = client.post(f'{BASE}/auth/change-password', headers=headers,
+                         json={'old_password': p, 'new_password': 'Ab1'})
+        assert r2.status_code == 400
+
+    def test_change_password_success(self, client, auth):
+        """正常修改密码后用新密码可登录"""
+        u = 'pwd_' + ''.join(__import__('random').choices(__import__('string').ascii_lowercase, k=6))
+        p = 'Test1234'
+        r = client.post(f'{BASE}/auth/register', json={'username': u, 'password': p, 'name': u})
+        if r.status_code != 201:
+            r = client.post(f'{BASE}/auth/login', json={'username': u, 'password': p})
+        token = r.json()['token']
+        headers = {'Authorization': f'Bearer {token}'}
+        new_p = 'NewPass456'
+        r2 = client.post(f'{BASE}/auth/change-password', headers=headers,
+                         json={'old_password': p, 'new_password': new_p})
+        assert r2.status_code == 200
+        # New password works
+        r3 = client.post(f'{BASE}/auth/login', json={'username': u, 'password': new_p})
+        assert r3.status_code == 200
+        assert 'token' in r3.json()
