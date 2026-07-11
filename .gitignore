@@ -40,3 +40,6 @@ _*.py
 .patch_*.ps1
 .tmp_patch.txt
 SESSION_CHECKPOINT.md
+
+# Obsidian vault 配置（本地，不入库；知识库内容由 docs/ 承载）
+.obsidian/
