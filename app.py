@@ -64,6 +64,7 @@ else:
     app.config['SECRET_KEY'] = os.urandom(32).hex()
     with open(_SECRET_KEY_FILE, 'w') as f:
         f.write(app.config['SECRET_KEY'])
+    os.chmod(_SECRET_KEY_FILE, 0o600)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB 上传大小限制
 
 @app.errorhandler(400)
@@ -102,6 +103,8 @@ def add_cache_headers(response):
         response.headers['Cache-Control'] = 'public, max-age=86400'
     elif request.path.startswith('/api/stats') or request.path.startswith('/api/tags'):
         response.headers['Cache-Control'] = 'private, max-age=60'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
     return response
 
 
@@ -611,6 +614,8 @@ def get_current_user():
         cursor = db.cursor()
         cursor.execute('SELECT id, username, name, avatar, created_at FROM users WHERE id = ?', (g.user_id,))
         user = cursor.fetchone()
+        if not user:
+            return jsonify({'error': '用户不存在'}), 404
         return jsonify(dict(user))
     elif request.method == 'PUT':
         data, err = safe_get_json()
@@ -618,6 +623,10 @@ def get_current_user():
             return err
         name = data.get('name', '').strip()
         avatar = data.get('avatar', '')
+        
+        # 校验 avatar URL 格式
+        if avatar and not avatar.startswith(('http://', 'https://', 'data:image/')):
+            return jsonify({'error': '头像URL格式无效'}), 400
         
         db = get_db()
         cursor = db.cursor()
@@ -633,6 +642,7 @@ def get_current_user():
             user = cursor.fetchone()
             return jsonify(dict(user))
         except Exception as e:
+            logger.warning('update_user failed: %s', e)
             return jsonify({'error': '更新用户信息失败'}), 500
 
 @app.route('/api/articles', methods=['GET'])
@@ -752,7 +762,7 @@ def get_article(article_id):
     if article:
         try:
             db.execute('UPDATE articles SET views = views + 1 WHERE id = ?', (article_id,))
-            db.commit()
+            safe_commit(db)
         except Exception as e:
             logger.warning('views increment failed: %s', e)
         return jsonify(dict(article))
@@ -782,7 +792,12 @@ def create_article():
     if tags and len(tags) > 500:
         return jsonify({'error': '标签不能超过500个字符'}), 400
 
+    # 校验分类是否存在于用户分类列表中
     db = get_db()
+    cursor = db.cursor()
+    cursor.execute('SELECT name FROM categories WHERE (user_id = ? OR user_id = 0) AND name = ?', (g.user_id, category))
+    if not cursor.fetchone():
+        return jsonify({'error': f'分类不存在: {category}'}), 400
     cursor = db.cursor()
     cursor.execute('INSERT INTO articles (title, content, category, tags, is_draft, user_id) VALUES (?, ?, ?, ?, ?, ?)',
                   (title, content, category, tags, int(is_draft), g.user_id))
@@ -936,7 +951,8 @@ def delete_category(category_id):
         if err:
             return err
         return jsonify({'message': '删除成功'})
-    except Exception:
+    except Exception as e:
+        logger.warning('delete_category failed: %s', e)
         db.rollback()
         return jsonify({'error': '删除失败'}), 500
 
@@ -1701,7 +1717,7 @@ def get_overtime_monthly_stats():
     })
 
 # ===== 记账模块 API =====
-EXPENSE_CATEGORIES = ['燃气费', '电费', '话费', '网费', '香烟', '菜肉米面油', '交通', '物业费', '水果', '其他']
+EXPENSE_CATEGORIES = ['燃气费', '电费', '话费', '网费', '暖气费', '香烟', '菜肉米面油', '交通', '物业费', '水果', '其他']
 
 @app.route('/api/expenses', methods=['GET'])
 @login_required
@@ -1759,6 +1775,8 @@ def export_expenses():
             ids = data.get('ids', [])
             if not ids:
                 return jsonify({'error': 'ids不能为空'}), 400
+            if not all(isinstance(i, int) for i in ids):
+                return jsonify({'error': 'ids必须为整数列表'}), 400
             placeholders = ','.join(['?'] * len(ids))
             params = list(ids) + [g.user_id]
             cursor.execute(f"SELECT id, category, amount, remark, date FROM expenses WHERE id IN ({placeholders}) AND user_id = ? ORDER BY date DESC", params)
@@ -1804,6 +1822,7 @@ def export_expenses():
         response.headers['Content-Disposition'] = f"attachment; filename=\"{safe_filename}\""
         return response
     except Exception as e:
+        logger.warning('export_expenses failed: %s', e)
         return jsonify({'error': '导出消费记录失败'}), 500
 
 # 猕猴桃销售订单导出
@@ -1877,6 +1896,7 @@ def export_kiwi_sales():
         response.headers['Content-Disposition'] = f"attachment; filename=\"{safe_filename}\""
         return response
     except Exception as e:
+        logger.warning('export_kiwi_sales failed: %s', e)
         return jsonify({'error': '导出猕猴桃销售记录失败'}), 500
 
 @app.route('/api/expenses', methods=['POST'])

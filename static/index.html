@@ -1539,6 +1539,7 @@
                         <i class="fa fa-search"></i>
                     </button>
                 </div>
+                <button class="btn btn-secondary" onclick="resetSearch()" style="padding:8px 16px;font-size:12px;font-weight:500;"><i class="fa fa-refresh"></i> 重置</button>
                 <div style="display:flex;align-items:center;gap:8px;margin-left:12px;">
                     <span style="color:#94a3b8;font-size:13px;">每页</span>
                     <select id="articlePageSizeSelect" onchange="changeArticlePageSize(this.value)" style="padding:6px 8px;border:1px solid rgba(148,163,184,0.2);border-radius:6px;background:rgba(30,41,59,0.8);color:#cbd5e1;font-size:13px;">
@@ -1877,8 +1878,6 @@
     </script>
     <script>
         const API_URL = '/api';
-        console.log('API_URL initialized:', API_URL);
-
         // DOM query cache: memoizes getElementById results
         const _domCache = Object.create(null);
         function _$(id) {
@@ -1890,6 +1889,43 @@
             return el;
         }
         function _clearDomCache() { for (const k in _domCache) delete _domCache[k]; }
+
+        /**
+         * 通用分页渲染函数
+         * @param {Object} config - 分页配置
+         * @param {string} config.containerId - 分页容器 ID
+         * @param {number} config.total - 总记录数
+         * @param {number} config.currentPage - 当前页码
+         * @param {number} config.pageSize - 每页大小
+         * @param {number[]} config.pageSizeOptions - 每页大小选项
+         * @param {Function} config.onPageChange - 页码变化回调
+         * @param {Function} config.onPageSizeChange - 每页大小变化回调
+         * @param {string} [config.itemName='条'] - 计量单位名称
+         */
+        function renderPaginationComponent(config) {
+            const { containerId, total, currentPage, pageSize, pageSizeOptions = [5, 10, 15], onPageChange, onPageSizeChange, itemName = '条' } = config;
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            const totalPages = Math.ceil(total / pageSize);
+            let html = `<div style="display:flex;align-items:center;gap:8px;margin-right:12px;"><span style="color:#94a3b8;font-size:12px;">每页</span><select onchange="(${onPageSizeChange.name})(this.value)" style="padding:4px 8px;border:1px solid rgba(148,163,184,0.2);border-radius:4px;background:rgba(30,41,59,0.8);color:#cbd5e1;font-size:12px;">`;
+            pageSizeOptions.forEach(s => { html += `<option value="${s}" ${pageSize === s ? 'selected' : ''}>${s}</option>`; });
+            html += `</select><span style="color:#94a3b8;font-size:12px;">${itemName}</span></div>`;
+            if (totalPages > 1) {
+                const showPages = 5;
+                let startPage = Math.max(1, currentPage - Math.floor(showPages / 2));
+                let endPage = Math.min(totalPages, startPage + showPages - 1);
+                if (endPage - startPage < showPages - 1) startPage = Math.max(1, endPage - showPages + 1);
+                html += `<button onclick="(${onPageChange.name})(1)" class="page-btn" ${currentPage === 1 ? 'disabled' : ''}>首页</button>`;
+                html += `<button onclick="(${onPageChange.name})(${currentPage - 1})" class="page-btn" ${currentPage === 1 ? 'disabled' : ''}>上一页</button>`;
+                for (let i = startPage; i <= endPage; i++) {
+                    html += `<button onclick="(${onPageChange.name})(${i})" class="page-btn ${currentPage === i ? 'active' : ''}">${i}</button>`;
+                }
+                html += `<button onclick="(${onPageChange.name})(${currentPage + 1})" class="page-btn" ${currentPage === totalPages ? 'disabled' : ''}>下一页</button>`;
+                html += `<button onclick="(${onPageChange.name})(${totalPages})" class="page-btn" ${currentPage === totalPages ? 'disabled' : ''}>末页</button>`;
+            }
+            html += `<span style="color:#94a3b8;font-size:12px;margin-left:12px;">共 ${total} ${itemName}，第 ${currentPage}/${totalPages || 1} 页</span>`;
+            container.innerHTML = html;
+        }
 
         /** 本地时间 YYYY-MM-DD（给 date input 默认值用，禁止使用 toISOString 的 UTC 日期） */
         function todayLocalISO(d = new Date()) {
@@ -2235,7 +2271,6 @@
             }
             
             try {
-                console.log('Updating profile with:', { name, avatar: avatar ? 'base64 data' : 'empty' });
                 const response = await fetchWithTimeout(`${API_URL}/auth/me`, {
                     method: 'PUT',
                     headers: {
@@ -2244,10 +2279,6 @@
                     },
                     body: JSON.stringify({ name, avatar })
                 });
-                
-                console.log('Response status:', response.status);
-                console.log('Response ok:', response.ok);
-                
                 if (!response.ok) {
                     const text = await response.text();
                     console.error('Response text:', text);
@@ -2255,7 +2286,6 @@
                 }
                 
                 const updatedUser = await response.json();
-                console.log('Updated user:', updatedUser);
                 localStorage.setItem('user', JSON.stringify(updatedUser));
                 user = updatedUser;
                 
@@ -2433,13 +2463,6 @@
         });
 
         async function loadArticles() {
-            console.log('=== 加载文章开始 ===');
-            console.log('当前分类:', currentCategory);
-            console.log('当前标签:', currentTag);
-            console.log('当前视图:', currentView);
-            console.log('当前页码:', currentPage);
-            console.log('每页大小:', pageSize);
-            
             let url = `${API_URL}/articles`;
             const params = [];
             if (currentCategory) params.push(`category=${encodeURIComponent(currentCategory)}`);
@@ -2448,8 +2471,6 @@
             params.push(`page=${currentPage}`);
             params.push(`page_size=${pageSize}`);
             if (params.length) url += '?' + params.join('&');
-            
-            console.log('请求URL:', url);
             try {
                 const response = await fetchWithTimeout(url, {
                     headers: getAuthHeaders()
@@ -2467,7 +2488,6 @@
                 }
                 
                 const result = await response.json();
-                console.log('API响应:', result);
                 if (!result || !Array.isArray(result.articles)) {
                     throw new Error('接口响应格式错误');
                 }
@@ -2589,31 +2609,15 @@
         }
         
         function renderPagination() {
-            const totalPages = Math.ceil(totalArticles / pageSize);
-
-            let paginationHTML = '';
-            // 每页选择（参考加班记录样式）——始终显示
-            paginationHTML += `<div style="display:flex;align-items:center;gap:8px;margin-right:12px;"><span style="color:#94a3b8;font-size:12px;">每页</span><select onchange="changeArticlePageSize(this.value)" style="padding:4px 8px;border:1px solid rgba(148,163,184,0.2);border-radius:4px;background:rgba(30,41,59,0.8);color:#cbd5e1;font-size:12px;">`;
-            [5,10,15].forEach(s => { paginationHTML += `<option value=\"${s}\" ${pageSize===s?'selected':''}>${s}</option>`; });
-            paginationHTML += `</select><span style="color:#94a3b8;font-size:12px;">条</span></div>`;
-
-            // 如果页数多于1，显示分页按钮；否则仅显示统计信息和每页选择器
-            if (totalPages > 1) {
-                const showPages = 5;
-                let startPage = Math.max(1, currentPage - Math.floor(showPages / 2));
-                let endPage = Math.min(totalPages, startPage + showPages - 1);
-                if (endPage - startPage < showPages - 1) startPage = Math.max(1, endPage - showPages + 1);
-                paginationHTML += `<button onclick="changePage(1)" class="page-btn" ${currentPage===1?'disabled':''}>首页</button>`;
-                paginationHTML += `<button onclick="changePage(${currentPage - 1})" class="page-btn" ${currentPage===1?'disabled':''}>上一页</button>`;
-                for (let i = startPage; i <= endPage; i++) {
-                    paginationHTML += `<button onclick="changePage(${i})" class="page-btn ${currentPage===i?'active':''}">${i}</button>`;
-                }
-                paginationHTML += `<button onclick="changePage(${currentPage + 1})" class="page-btn" ${currentPage===totalPages?'disabled':''}>下一页</button>`;
-                paginationHTML += `<button onclick="changePage(${totalPages})" class="page-btn" ${currentPage===totalPages?'disabled':''}>末页</button>`;
-            }
-
-            paginationHTML += `<span style="color:#94a3b8;font-size:12px;margin-left:12px;">共 ${totalArticles} 篇，第 ${currentPage}/${totalPages || 1} 页</span>`;
-            return paginationHTML;
+            renderPaginationComponent({
+                containerId: 'articlePagination',
+                total: totalArticles,
+                currentPage: currentPage,
+                pageSize: pageSize,
+                onPageChange: changePage,
+                onPageSizeChange: changeArticlePageSize,
+                itemName: '篇'
+            });
         }
 
         function changeArticlePageSize(size) {
@@ -2650,34 +2654,17 @@
         });
         // 文章导航函数
         async function navigateArticle(currentId, direction) {
-            console.log('=== navigateArticle called ===');
-            console.log('Current ID:', currentId);
-            console.log('Direction:', direction);
-            console.log('API_URL:', API_URL);
-            
             try {
                 const headers = getAuthHeaders();
-                console.log('Headers:', headers);
-                
                 // 手动构建完整URL，确保包含API前缀
                 const fullUrl = `${API_URL}/articles/navigate?current_id=${currentId}&direction=${direction}`;
-                console.log('Full URL:', fullUrl);
-                
                 const response = await fetchWithTimeout(fullUrl, {
                     headers: headers
                 });
-                
-                console.log('Response status:', response.status);
-                console.log('Response ok:', response.ok);
-                
                 const result = await response.json();
-                console.log('Response result:', result);
-                
                 if (result.article) {
-                    console.log('Found article:', result.article);
                     viewArticle(result.article.id);
                 } else {
-                    console.log('No article found');
                     alert(direction === 'prev' ? `已经是第一篇${articleTerm(currentCategory)}了` : `已经是最后一篇${articleTerm(currentCategory)}了`);
                 }
             } catch (error) {
@@ -2695,8 +2682,6 @@
         }
 
         function filterByCategory(category) {
-            console.log('=== 切换分类 ===');
-            console.log('新分类:', category);
             currentCategory = category;
             currentTag = null;
             currentPage = 1;
@@ -2801,12 +2786,16 @@
                 }
             }, 300);
         }
+        function resetSearch() {
+            document.getElementById('searchInput').value = '';
+            currentCategory = null;
+            currentTag = null;
+            currentPage = 1;
+            loadArticles();
+        }
 
         async function searchArticles(searchTerm) {
             try {
-                console.log('=== 搜索文章 ===');
-                console.log('搜索关键词:', searchTerm);
-                
                 const response = await fetchWithTimeout(`${API_URL}/articles?search=${encodeURIComponent(searchTerm)}&page=${currentPage}&page_size=${pageSize}`, {
                     headers: getAuthHeaders()
                 });
@@ -2820,8 +2809,6 @@
                 }
                 
                 const result = await response.json();
-                console.log('搜索响应:', result);
-                
                 if (!result || !Array.isArray(result.articles)) {
                     throw new Error('搜索响应格式错误');
                 }
@@ -3085,29 +3072,15 @@
         }
 
         function renderKiwiSalesPagination() {
-            const pagination = document.getElementById('kiwiSalesPagination');
-            if (!pagination) return;
-            
-            const totalPages = Math.ceil(kiwiSalesTotal / kiwiSalesPageSize);
-            let paginationHTML = `<div style="display:flex;align-items:center;gap:8px;margin-right:12px;"><span style="color:#94a3b8;font-size:12px;">每页</span><select onchange="changeKiwiSalesPageSize(this.value)" style="padding:4px 8px;border:1px solid rgba(148,163,184,0.2);border-radius:4px;background:rgba(30,41,59,0.8);color:#cbd5e1;font-size:12px;">`;
-            [5,10,15].forEach(s => { paginationHTML += `<option value="${s}" ${kiwiSalesPageSize===s?'selected':''}>${s}</option>`; });
-            paginationHTML += `</select><span style="color:#94a3b8;font-size:12px;">条</span></div>`;
-            
-            if (totalPages > 1) {
-                const showPages = 5;
-                let startPage = Math.max(1, kiwiSalesCurrentPage - Math.floor(showPages / 2));
-                let endPage = Math.min(totalPages, startPage + showPages - 1);
-                if (endPage - startPage < showPages - 1) startPage = Math.max(1, endPage - showPages + 1);
-                paginationHTML += `<button onclick="changeKiwiSalesPage(1)" class="page-btn" ${kiwiSalesCurrentPage===1?'disabled':''}>首页</button>`;
-                paginationHTML += `<button onclick="changeKiwiSalesPage(${kiwiSalesCurrentPage - 1})" class="page-btn" ${kiwiSalesCurrentPage===1?'disabled':''}>上一页</button>`;
-                for (let i = startPage; i <= endPage; i++) {
-                    paginationHTML += `<button onclick="changeKiwiSalesPage(${i})" class="page-btn ${kiwiSalesCurrentPage===i?'active':''}">${i}</button>`;
-                }
-                paginationHTML += `<button onclick="changeKiwiSalesPage(${kiwiSalesCurrentPage + 1})" class="page-btn" ${kiwiSalesCurrentPage===totalPages?'disabled':''}>下一页</button>`;
-                paginationHTML += `<button onclick="changeKiwiSalesPage(${totalPages})" class="page-btn" ${kiwiSalesCurrentPage===totalPages?'disabled':''}>末页</button>`;
-            }
-            paginationHTML += `<span style="color:#94a3b8;font-size:12px;margin-left:12px;">共 ${kiwiSalesTotal} 条，第 ${kiwiSalesCurrentPage}/${totalPages || 1} 页</span>`;
-            pagination.innerHTML = paginationHTML;
+            renderPaginationComponent({
+                containerId: 'kiwiSalesPagination',
+                total: kiwiSalesTotal,
+                currentPage: kiwiSalesCurrentPage,
+                pageSize: kiwiSalesPageSize,
+                onPageChange: changeKiwiSalesPage,
+                onPageSizeChange: changeKiwiSalesPageSize,
+                itemName: '条'
+            });
         }
         
         function changeKiwiSalesPageSize(size) {
@@ -3144,6 +3117,7 @@
                             <select id="kiwiReportYear" onchange="loadKiwiReport()" style="padding:8px 12px;border:1px solid rgba(148,163,184,0.2);border-radius:6px;background:rgba(30,41,59,0.8);color:#cbd5e1;font-size:12px;">
                                 ${yearOptions}
                             </select>
+                            <button class="btn btn-secondary" onclick="resetKiwiReportYear()" style="padding:8px 16px;font-size:12px;font-weight:500;"><i class="fa fa-refresh"></i> 重置</button>
                         </div>
                         <h2 style="color: #94a3b8; margin: 0; font-size: 18px; text-align: center; flex: 1; font-weight: 500;"><i class="fa fa-lemon-o" style="color: #7CFC00; margin-right: 8px;"></i> 销售报表统计</h2>
                         <div style="width:120px;"></div>
@@ -3184,6 +3158,14 @@
             // 无论成功失败，都渲染统计和列表（无数据时显示 0 和空列表）
             renderKiwiReportStats(data ? data.summary : null);
             renderKiwiReport();
+        }
+
+        function resetKiwiReportYear() {
+            const yearSelect = document.getElementById('kiwiReportYear');
+            if (yearSelect) {
+                yearSelect.value = new Date().getFullYear();
+                loadKiwiReport();
+            }
         }
         
         function renderKiwiReportStats(summary) {
@@ -3641,27 +3623,15 @@
         }
 
         function renderExpensePagination() {
-            const el = document.getElementById('expensePagination');
-            if (!el) return;
-            const totalPages = Math.ceil(expenseTotal / expensePageSize);
-            let html = `<div style="display:flex;align-items:center;gap:8px;margin-right:12px;"><span style="color:#94a3b8;font-size:12px;">每页</span><select onchange="changeExpensePageSize(this.value)" style="padding:4px 8px;border:1px solid rgba(148,163,184,0.2);border-radius:4px;background:rgba(30,41,59,0.8);color:#cbd5e1;font-size:12px;">`;
-            [5,10,15].forEach(s => { html += `<option value="${s}" ${expensePageSize===s?'selected':''}>${s}</option>`; });
-            html += `</select><span style="color:#94a3b8;font-size:12px;">条</span></div>`;
-            if (totalPages > 1) {
-                const showPages = 5;
-                let startPage = Math.max(1, expenseCurrentPage - Math.floor(showPages / 2));
-                let endPage = Math.min(totalPages, startPage + showPages - 1);
-                if (endPage - startPage < showPages - 1) startPage = Math.max(1, endPage - showPages + 1);
-                html += `<button onclick="changeExpensePage(1)" class="page-btn" ${expenseCurrentPage===1?'disabled':''}>首页</button>`;
-                html += `<button onclick="changeExpensePage(${expenseCurrentPage-1})" class="page-btn" ${expenseCurrentPage===1?'disabled':''}>上一页</button>`;
-                for (let i = startPage; i <= endPage; i++) {
-                    html += `<button onclick="changeExpensePage(${i})" class="page-btn ${expenseCurrentPage===i?'active':''}">${i}</button>`;
-                }
-                html += `<button onclick="changeExpensePage(${expenseCurrentPage+1})" class="page-btn" ${expenseCurrentPage===totalPages?'disabled':''}>下一页</button>`;
-                html += `<button onclick="changeExpensePage(${totalPages})" class="page-btn" ${expenseCurrentPage===totalPages?'disabled':''}>末页</button>`;
-            }
-            html += `<span style="color:#94a3b8;font-size:12px;margin-left:12px;">共 ${expenseTotal} 条，第 ${expenseCurrentPage}/${totalPages || 1} 页</span>`;
-            el.innerHTML = html;
+            renderPaginationComponent({
+                containerId: 'expensePagination',
+                total: expenseTotal,
+                currentPage: expenseCurrentPage,
+                pageSize: expensePageSize,
+                onPageChange: changeExpensePage,
+                onPageSizeChange: changeExpensePageSize,
+                itemName: '条'
+            });
         }
 
         function changeExpensePageSize(size) {
@@ -4346,29 +4316,15 @@
         }
 
         function renderOvertimePagination() {
-            const el = document.getElementById('overtimePagination');
-            if (!el) return;
-            const totalPages = Math.ceil(overtimeTotal / overtimePageSize);
-            let html = `<div style="display:flex;align-items:center;gap:8px;margin-right:12px;"><span style="color:#94a3b8;font-size:12px;">每页</span><select onchange="changeOvertimePageSize(this.value)" style="padding:4px 8px;border:1px solid rgba(148,163,184,0.2);border-radius:4px;background:rgba(30,41,59,0.8);color:#cbd5e1;font-size:12px;">`;
-            [5,10,15].forEach(s => {
-                html += `<option value="${s}" ${overtimePageSize===s?'selected':''}>${s}</option>`;
+            renderPaginationComponent({
+                containerId: 'overtimePagination',
+                total: overtimeTotal,
+                currentPage: overtimeCurrentPage,
+                pageSize: overtimePageSize,
+                onPageChange: changeOvertimePage,
+                onPageSizeChange: changeOvertimePageSize,
+                itemName: '条'
             });
-            html += `</select><span style="color:#94a3b8;font-size:12px;">条</span></div>`;
-            if (totalPages > 1) {
-                const showPages = 5;
-                let startPage = Math.max(1, overtimeCurrentPage - Math.floor(showPages / 2));
-                let endPage = Math.min(totalPages, startPage + showPages - 1);
-                if (endPage - startPage < showPages - 1) startPage = Math.max(1, endPage - showPages + 1);
-                html += `<button onclick="changeOvertimePage(1)" class="page-btn" ${overtimeCurrentPage===1?'disabled':''}>首页</button>`;
-                html += `<button onclick="changeOvertimePage(${overtimeCurrentPage-1})" class="page-btn" ${overtimeCurrentPage===1?'disabled':''}>上一页</button>`;
-                for (let i = startPage; i <= endPage; i++) {
-                    html += `<button onclick="changeOvertimePage(${i})" class="page-btn ${overtimeCurrentPage===i?'active':''}">${i}</button>`;
-                }
-                html += `<button onclick="changeOvertimePage(${overtimeCurrentPage+1})" class="page-btn" ${overtimeCurrentPage===totalPages?'disabled':''}>下一页</button>`;
-                html += `<button onclick="changeOvertimePage(${totalPages})" class="page-btn" ${overtimeCurrentPage===totalPages?'disabled':''}>末页</button>`;
-            }
-            html += `<span style="color:#94a3b8;font-size:12px;margin-left:12px;">共 ${overtimeTotal} 条，第 ${overtimeCurrentPage}/${totalPages || 1} 页</span>`;
-            el.innerHTML = html;
         }
 
         function changeOvertimePageSize(size) {
@@ -4525,6 +4481,7 @@
                         <div style="display:flex;align-items:center;gap:8px;">
                             <label style="font-size:12px;color:#94a3b8;">统计月份：</label>
                             <input type="month" id="overtimeMonthlyFilter" value="${defaultMonth}" onchange="loadOvertimeMonthlyStats()" style="padding:8px 12px;border:1px solid rgba(148,163,184,0.2);border-radius:6px;background:rgba(30,41,59,0.8);color:#cbd5e1;font-size:12px;">
+                            <button class="btn btn-secondary" onclick="resetOvertimeMonthlyFilter()" style="padding:8px 16px;font-size:12px;font-weight:500;"><i class="fa fa-refresh"></i> 重置</button>
                         </div>
                     </div>
                     <div id="overtimeMonthlyPeriod" style="margin-bottom:16px;padding:12px 16px;background:rgba(30,41,59,0.4);border:1px solid rgba(148,163,184,0.1);border-radius:8px;color:#94a3b8;font-size:13px;"></div>
@@ -4537,6 +4494,7 @@
         async function loadOvertimeMonthlyStats() {
             const month = document.getElementById('overtimeMonthlyFilter').value;
             if (!month) return;
+
             try {
                 const response = await fetchWithTimeout(`${API_URL}/overtime/stats/monthly?month=${month}`, { headers: getAuthHeaders() });
                 if (!response.ok) return;
@@ -4573,6 +4531,13 @@
                 const statsEl = document.getElementById('overtimeMonthlyStats');
                 if (statsEl) statsEl.innerHTML = '<div class="error-message">加载月度统计失败</div>';
             }
+        }
+
+        function resetOvertimeMonthlyFilter() {
+            const now = new Date();
+            const defaultMonth = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+            document.getElementById('overtimeMonthlyFilter').value = defaultMonth;
+            loadOvertimeMonthlyStats();
         }
 
         function filterOvertimeByMonth() {
@@ -5039,6 +5004,11 @@
                             breaks: true,
                             gfm: true,
                             highlight: function(code, lang) {
+                                // 先转义 HTML 特殊字符，防止 XSS
+                                function escapeHtml(str) {
+                                    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+                                }
+                                code = escapeHtml(code);
                                 // 简单的语法高亮
                                 if (!lang) return code;
                                 
@@ -5319,6 +5289,11 @@
                             breaks: true,
                             gfm: true,
                             highlight: function(code, lang) {
+                                // 先转义 HTML 特殊字符，防止 XSS
+                                function escapeHtml(str) {
+                                    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+                                }
+                                code = escapeHtml(code);
                                 // 简单的语法高亮
                                 if (!lang) return code;
                                 
@@ -5424,57 +5399,40 @@
             pwdFields.forEach(f => f.value = '');
         }
 
-        async function saveArticle(event) {
+        /**
+         * 通用文章保存函数
+         * @param {number} isDraft - 是否为草稿 (0=发布, 1=草稿)
+         */
+        async function saveArticleCommon(isDraft) {
             if (window._submitting) return;
             window._submitting = true;
             try {
-                // 移除event.preventDefault()，因为按钮现在是type="button"
-                console.log('=== saveArticle function called ===');
-                
-                try {
-                // 检查DOM元素是否存在
                 const titleElement = _$('articleTitle');
                 const categoryElement = _$('articleCategory');
                 const tagsElement = _$('articleTags');
                 const contentElement = _$('articleContent');
                 const idElement = document.getElementById('articleId');
-                
-                console.log('DOM elements:', {
-                    titleElement: titleElement ? 'found' : 'not found',
-                    categoryElement: categoryElement ? 'found' : 'not found',
-                    tagsElement: tagsElement ? 'found' : 'not found',
-                    contentElement: contentElement ? 'found' : 'not found',
-                    idElement: idElement ? 'found' : 'not found'
-                });
-                
-                // 检查API_URL
-                console.log('API_URL:', API_URL);
-                
-                // 获取表单数据
+
                 const article = {
-                    title: titleElement ? titleElement.value.trim() : '',
+                    title: titleElement ? (titleElement.value.trim() || (isDraft ? '无标题' : '')) : (isDraft ? '无标题' : ''),
                     category: categoryElement ? categoryElement.value : '未分类',
                     tags: tagsElement ? tagsElement.value.trim() : '',
                     content: easyMDE ? easyMDE.value() : (contentElement ? contentElement.value.trim() : ''),
-                    is_draft: 0
+                    is_draft: isDraft
                 };
-                
-                console.log('Article data:', article);
-                
                 const id = idElement ? idElement.value : '';
-                console.log('Article ID:', id);
-                
-                if (!article.title) {
-                    alert('请输入' + articleTerm(article.category) + '标题');
-                    return;
+
+                if (!isDraft) {
+                    if (!article.title) {
+                        alert('请输入' + articleTerm(article.category) + '标题');
+                        return;
+                    }
+                    if (!article.content) {
+                        alert('请填写内容');
+                        return;
+                    }
                 }
-                if (!article.content) {
-                    alert('请填写内容');
-                    return;
-                }
-                
-                // 发送请求
-                console.log('Sending request...');
+
                 const response = await fetchWithTimeout(id ? `${API_URL}/articles/${id}` : `${API_URL}/articles`, {
                     method: id ? 'PUT' : 'POST',
                     headers: {
@@ -5483,106 +5441,33 @@
                     },
                     body: JSON.stringify(article)
                 });
-                
-                console.log('Response status:', response.status);
-                console.log('Response ok:', response.ok);
-                
                 if (!response.ok) {
                     throw new Error(`请求失败，状态码: ${response.status}`);
                 }
-                
+
                 closeModal();
                 if (easyMDE) easyMDE.toTextArea();
                 easyMDE = null;
                 await Promise.all([loadArticles(), loadCategories(), loadStats()]);
-                
-                alert(id ? articleTerm(article.category) + '更新成功！' : articleTerm(article.category) + '保存成功！');
+
+                alert(isDraft ? '草稿保存成功！' : (id ? articleTerm(article.category) + '更新成功！' : articleTerm(article.category) + '保存成功！'));
             } catch (error) {
                 console.error('保存文章失败:', error);
-                alert('保存失败，请稍后重试');
+                alert(isDraft ? '保存草稿失败，请稍后重试' : '保存失败，请稍后重试');
                 if (error.message.includes('401')) {
-                    // 未授权，重新检查认证状态
                     checkAuth();
                 }
-            }
             } finally {
                 window._submitting = false;
             }
         }
 
+        async function saveArticle(event) {
+            await saveArticleCommon(0);
+        }
+
         async function saveDraft() {
-            if (window._submitting) return;
-            window._submitting = true;
-            try {
-                console.log('=== saveDraft function called ===');
-                
-                try {
-                // 检查DOM元素是否存在
-                const titleElement = _$('articleTitle');
-                const categoryElement = _$('articleCategory');
-                const tagsElement = _$('articleTags');
-                const contentElement = _$('articleContent');
-                const idElement = document.getElementById('articleId');
-                
-                console.log('DOM elements:', {
-                    titleElement: titleElement ? 'found' : 'not found',
-                    categoryElement: categoryElement ? 'found' : 'not found',
-                    tagsElement: tagsElement ? 'found' : 'not found',
-                    contentElement: contentElement ? 'found' : 'not found',
-                    idElement: idElement ? 'found' : 'not found'
-                });
-                
-                // 检查API_URL
-                console.log('API_URL:', API_URL);
-                
-                // 获取表单数据
-                const article = {
-                    title: titleElement ? (titleElement.value.trim() || '无标题') : '无标题',
-                    category: categoryElement ? categoryElement.value : '未分类',
-                    tags: tagsElement ? tagsElement.value.trim() : '',
-                    content: easyMDE ? easyMDE.value() : (contentElement ? contentElement.value.trim() : ''),
-                    is_draft: 1
-                };
-                
-                console.log('Draft data:', article);
-                
-                const id = idElement ? idElement.value : '';
-                console.log('Article ID:', id);
-                
-                // 发送请求
-                console.log('Sending request...');
-                const response = await fetchWithTimeout(id ? `${API_URL}/articles/${id}` : `${API_URL}/articles`, {
-                    method: id ? 'PUT' : 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify(article)
-                });
-                
-                console.log('Response status:', response.status);
-                console.log('Response ok:', response.ok);
-                
-                if (!response.ok) {
-                    throw new Error(`请求失败，状态码: ${response.status}`);
-                }
-                
-                alert('草稿保存成功！');
-                
-                closeModal();
-                
-                await await Promise.all([loadArticles(), loadCategories(), loadStats()]);
-            } catch (error) {
-                console.error('保存草稿失败:', error);
-                alert('保存草稿失败，请稍后重试');
-                if (error.message.includes('401')) {
-                    // 未授权，重新检查认证状态
-                    checkAuth();
-                }
-            }
-            } finally {
-                window._submitting = false;
-            }
+            await saveArticleCommon(1);
         }
 
         async function deleteArticle(id, event) {
@@ -5604,7 +5489,7 @@
                     currentPage--;
                 }
 
-                await await Promise.all([loadArticles(), loadCategories(), loadStats()]);
+                await Promise.all([loadArticles(), loadCategories(), loadStats()]);
 
                 // 清除选中状态，隐藏删除按钮
                 const selectAllCheckbox = document.getElementById('selectAllCheckbox');
@@ -5669,7 +5554,7 @@
                     if (renderedArticlesCache.length === articleIds.length && currentPage > 1) {
                         currentPage--;
                     }
-                    await await Promise.all([loadArticles(), loadCategories(), loadStats()]);
+                    await Promise.all([loadArticles(), loadCategories(), loadStats()]);
                     
                     // 清除选中状态，隐藏删除按钮
                     const selectAllCheckbox = document.getElementById('selectAllCheckbox');
@@ -5886,16 +5771,11 @@
 
         // viewArticle函数
         function viewArticle(id) {
-            console.log('=== viewArticle function called ===');
-            console.log('Article ID:', id);
-            
             // 确保 Marked.js 已加载
             if (typeof marked === 'undefined') {
-                console.log('Marked.js not loaded, loading now...');
                 const script = document.createElement('script');
                 script.src = 'https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js';
                 script.onload = function() {
-                    console.log('Marked.js loaded successfully');
                     renderArticle(id);
                 };
                 script.onerror = function() {
@@ -5928,15 +5808,12 @@
                 headers: getAuthHeaders()
             })
                 .then(response => {
-                    console.log('Response status:', response.status);
                     if (!response.ok) {
                         throw new Error(`请求失败，状态码: ${response.status}`);
                     }
                     return response.json();
                 })
                 .then(data => {
-                    console.log('Article data:', data);
-                    
                     // 显示文章
                     articleList.innerHTML = `
                         <div style="background: rgba(30, 41, 59, 0.6); border: 1px solid rgba(148, 163, 184, 0.1); border-radius:20px;padding:36px;backdrop-filter: blur(10px);">
@@ -6038,7 +5915,6 @@
                                             console.warn('highlight.js: language not registered:', lang);
                                         }
                                         hljs.highlightElement(block);
-                                        console.log('highlighted block:', { classList: block.className, htmlSample: block.innerHTML.slice(0,200) });
                                     } catch (e) {
                                         console.error('highlight error', e);
                                     }

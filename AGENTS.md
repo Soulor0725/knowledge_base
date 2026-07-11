@@ -1,4 +1,4 @@
-﻿# AGENTS.md — Echo v2.5.2
+# AGENTS.md — Echo v2.5.2
 
 ## Architecture
 - `app.py` (2069 lines): Flask monolith. Sections have `# ----` markers for grep.
@@ -93,6 +93,24 @@ python test_api.py               # smoke test, server must run on localhost:5001
 - **根因**: `get_kiwi_sales()` 函数上方缺少 `@app.route("/api/kiwi-sales", methods=["GET"])` 和 `@login_required` 装饰器
 - **修复**: 在函数定义前补上两个装饰器
 - **规则**: 新增或移动 Flask 路由函数时，**必须**检查 `@app.route()` + `@login_required` 装饰器是否完整；批量重构后运行一次 `test_api.py` 验证所有接口可达
+
+### 2026-07-11 按钮放在 position:relative 容器内导致错位
+- **现象**: 工作日报搜索栏的重置按钮位置异常，不在预期的对齐位置
+- **根因**: 重置按钮放在 `.search-box`（`position:relative`）内部，而 `.search-box` 的 input 是 `width:100%`，按钮被挤到下方
+- **修复**: 将按钮移出 `.search-box`，作为 `.toolbar`（`display:flex`）的直接子元素
+- **规则**: 新增按钮/控件时，检查父容器是否 `position:relative`；flex 布局中子元素**必须是 flex 容器的直接子元素**才能正确对齐
+
+### 2026-07-11 敏感文件写入后必须限制权限
+- **现象**: `.secret_key` 文件生成后任何系统用户可读取 JWT 签名密钥
+- **根因**: `open('file', 'w')` 写入后未调用 `os.chmod`，使用默认权限（通常 0o644）
+- **修复**: 写入后立即 `os.chmod(file, 0o600)`
+- **规则**: 生成密钥/token/凭据文件后**必须** `os.chmod(path, 0o600)` 限制仅所有者可读
+
+### 2026-07-11 Flask 响应必须添加安全头
+- **现象**: HTTP 响应缺少 `X-Content-Type-Options` 和 `X-Frame-Options`，存在 MIME 嗅探和点击劫持风险
+- **根因**: `@app.after_request` 中未设置安全响应头
+- **修复**: 在 `add_cache_headers` 中添加 `X-Content-Type-Options: nosniff` 和 `X-Frame-Options: DENY`
+- **规则**: 所有 HTTP 响应**必须**包含 `X-Content-Type-Options: nosniff` 和 `X-Frame-Options: DENY`
 
 ## 架构风险预警
 ### 并发安全
