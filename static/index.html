@@ -1617,11 +1617,11 @@
             </div>
             <form id="loginForm" onsubmit="login(event)">
                 <div class="form-group">
-                    <label>用户名</label>
+                    <label>用户名 *</label>
                     <input type="text" id="loginUsername" required placeholder="请输入用户名">
                 </div>
                 <div class="form-group">
-                    <label>密码</label>
+                    <label>密码 *</label>
                     <input type="password" id="loginPassword" required placeholder="请输入密码">
                 </div>
                 <div class="form-actions">
@@ -1630,7 +1630,7 @@
             </form>
             <form id="registerForm" onsubmit="register(event)" style="display: none;">
                 <div class="form-group">
-                    <label>用户名</label>
+                    <label>用户名 *</label>
                     <input type="text" id="registerUsername" required placeholder="请输入用户名（至少3个字符）">
                 </div>
                 <div class="form-group">
@@ -1638,7 +1638,7 @@
                     <input type="text" id="registerName" placeholder="请输入中文名字">
                 </div>
                 <div class="form-group">
-                    <label>密码</label>
+                    <label>密码 *</label>
                     <input type="password" id="registerPassword" required placeholder="请输入密码（至少6个字符）">
                 </div>
                 <div class="form-actions">
@@ -1683,15 +1683,15 @@
                 <h3 style="font-size: 14px; color: #94a3b8; margin-bottom: 12px;">修改密码</h3>
                 <form id="changePasswordForm" onsubmit="changePassword(event)">
                     <div class="form-group">
-                        <label>原密码</label>
+                        <label>原密码 *</label>
                         <input type="password" id="oldPassword" required placeholder="请输入当前密码">
                     </div>
                     <div class="form-group">
-                        <label>新密码</label>
+                        <label>新密码 *</label>
                         <input type="password" id="newPassword" required placeholder="至少8位，含大小写字母和数字">
                     </div>
                     <div class="form-group">
-                        <label>确认新密码</label>
+                        <label>确认新密码 *</label>
                         <input type="password" id="confirmNewPassword" required placeholder="请再次输入新密码">
                     </div>
                     <div class="form-actions">
@@ -1772,19 +1772,19 @@
             <form id="overtimeForm" onsubmit="saveOvertimeRecord(event)">
                 <input type="hidden" id="overtimeRecordId">
                 <div class="form-group">
-                    <label>加班类型</label>
+                    <label>加班类型 *</label>
                     <select id="overtimeType" required onchange="onOvertimeTypeChange()">
                         <option value="weekday">平时加班（19:00-23:59）</option>
                         <option value="weekend">周末加班（08:30-23:59）</option>
                     </select>
                 </div>
                 <div class="form-group">
-                    <label>日期</label>
+                    <label>日期 *</label>
                     <input type="date" id="overtimeDate" required>
                 </div>
                 <div class="form-group" style="display: flex; gap: 12px;">
                     <div style="flex:1;">
-                        <label>开始时间</label>
+                        <label>开始时间 *</label>
                         <div class="time-picker" onclick="toggleTimePicker(this)">
                             <i class="fa fa-clock-o time-picker-icon"></i>
                             <select class="time-hour" onchange="onTimeChange(this, 'overtimeStartTime')">
@@ -1826,7 +1826,7 @@
                         <input type="hidden" id="overtimeStartTime" required>
                     </div>
                     <div style="flex:1;">
-                        <label>结束时间</label>
+                        <label>结束时间 *</label>
                         <div class="time-picker" onclick="toggleTimePicker(this)">
                             <i class="fa fa-clock-o time-picker-icon"></i>
                             <select class="time-hour" onchange="onTimeChange(this, 'overtimeEndTime')">
@@ -1928,7 +1928,7 @@
             <form id="articleForm" onsubmit="saveArticle(event)">
                 <input type="hidden" id="articleId">
                 <div class="form-group">
-                    <label>标题</label>
+                    <label>标题 *</label>
                     <input type="text" id="articleTitle" required placeholder="输入文章标题">
                 </div>
                 <div class="form-group">
@@ -1942,7 +1942,7 @@
                     <input type="text" id="articleTags" placeholder="例如: 技术, Python, 笔记">
                 </div>
                 <div class="form-group">
-                    <label>内容</label>
+                    <label>内容 *</label>
                     <div style="position: relative;">
                         <textarea id="articleContent" required placeholder="在这里写下你的内容..."></textarea>
                         <div style="position: absolute; top: 10px; right: 10px; display: flex; gap: 8px;">
@@ -1968,7 +1968,7 @@
             </div>
             <form id="categoryForm" onsubmit="saveCategory(event)">
                 <div class="form-group">
-                    <label>分类名称</label>
+                    <label>分类名称 *</label>
                     <input type="text" id="categoryName" required placeholder="例如: 投资理财">
                 </div>
                 <div class="form-group">
