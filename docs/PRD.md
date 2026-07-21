@@ -605,3 +605,12 @@ CREATE TABLE overtime_records (
 - 原型设计：蓝湖/墨刀
 - API文档：Swagger/OpenAPI
 - 数据库设计：ER图
+
+## 相关链接
+- [[architecture/overview]] - 系统架构总览
+- [[INTERACTION_DESIGN]] - 交互设计规范
+- [[modules/auth]] - 认证模块
+- [[modules/articles]] - 文章模块
+- [[modules/kiwi-sales]] - 猕猴桃销售模块
+- [[modules/overtime]] - 加班记录模块
+- [[modules/expenses]] - 记账模块

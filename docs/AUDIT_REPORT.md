@@ -356,3 +356,11 @@
 ---
 
 *审计完成。系统整体质量良好，适合生产环境使用。建议按优先级列表逐步改进。*
+
+## 相关链接
+- [[architecture/overview]] - 系统架构总览
+- [[modules/auth]] - 认证模块
+- [[modules/articles]] - 文章模块
+- [[BUG_FIX_LESSONS]] - Bug 修复经验
+- [[TEST_OPTIMIZATION_MASTER]] - 测试优化指南
+- [[TOKEN_OPTIMIZATION]] - Token 优化方案

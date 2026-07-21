@@ -23,3 +23,9 @@ CI notes:
 
 Tips:
 - Keep tests independent of the Python API server where possible; for integration tests that require the backend, run the Flask app in a separate job step or use a service container.
+
+## 相关链接
+- [[architecture/overview]] - 系统架构总览
+- [[TEST_OPTIMIZATION_MASTER]] - 测试优化指南
+- [[TEST_TOKEN_OPTIMIZATION]] - 测试 Token 优化
+- [[guides/coding-standards]] - 编码规范

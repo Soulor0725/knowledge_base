@@ -163,3 +163,12 @@ CREATE INDEX idx_kiwi_sales_user_created ON kiwi_sales(user_id, created_at DESC)
 
 ## 相关文件
 - `routes/kiwi_sales.py` - 路由实现 (305行)
+
+## 相关链接
+- [[architecture/overview]] - 系统架构总览
+- [[modules/auth]] - 认证模块（用户隔离）
+- [[modules/articles]] - 文章模块
+- [[modules/overtime]] - 加班记录模块
+- [[modules/expenses]] - 记账模块
+- [[BUG_FIX_LESSONS]] - Bug 修复经验（含猕猴桃相关）
+- [[guides/coding-standards]] - 编码规范

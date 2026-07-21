@@ -436,3 +436,12 @@ Focus边框: #667eea
 | 字体 | 字号、字重、行高 |
 | 交互 | 点击、悬停、跳转 |
 | 状态 | 默认、悬停、禁用、错误 |
+
+## 相关链接
+- [[architecture/overview]] - 系统架构总览
+- [[modules/auth]] - 认证模块
+- [[modules/articles]] - 文章模块
+- [[modules/kiwi-sales]] - 猕猴桃销售模块
+- [[modules/overtime]] - 加班记录模块
+- [[modules/expenses]] - 记账模块
+- [[PRD]] - 产品需求文档

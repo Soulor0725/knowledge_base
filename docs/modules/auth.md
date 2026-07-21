@@ -136,3 +136,12 @@ CREATE TABLE users (
 - `routes/auth.py` - 路由实现 (185行)
 - `auth_utils.py` - token 工具函数
 - `config.py` - 配置常量
+
+## 相关链接
+- [[architecture/overview]] - 系统架构总览
+- [[modules/articles]] - 文章模块（依赖认证）
+- [[modules/kiwi-sales]] - 猕猴桃销售模块（依赖认证）
+- [[modules/overtime]] - 加班记录模块（依赖认证）
+- [[modules/expenses]] - 记账模块（依赖认证）
+- [[TOKEN_OPTIMIZATION]] - Token 优化方案
+- [[BUG_FIX_LESSONS]] - Bug 修复经验（含认证相关）

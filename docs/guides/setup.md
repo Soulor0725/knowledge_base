@@ -96,3 +96,9 @@ print('密码已重置')
 ### Obsidian
 - 打开项目根目录作为 Vault
 - 配置见 `.obsidian/` 目录
+
+## 相关链接
+- [[architecture/overview]] - 系统架构总览
+- [[guides/coding-standards]] - 编码规范
+- [[guides/deployment]] - 部署流程
+- [[ALIYUN_DEPLOY]] - 阿里云部署指南

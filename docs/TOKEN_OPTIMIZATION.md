@@ -312,3 +312,10 @@ pip install -r requirements.txt
 ---
 
 > 💡 **最重要的一句话：每一轮对话都会重发全部历史 + CLAUDE.md。省 token 的核心不是少说话，而是让 Claude 用最少轮数、最小工具输出（Grep 而非 Read）完成精确任务，并在完成后立即 /compact 压缩历史。**
+
+## 相关链接
+- [[architecture/overview]] - 系统架构总览
+- [[TEST_OPTIMIZATION_MASTER]] - 测试优化指南
+- [[TEST_TOKEN_OPTIMIZATION]] - 测试 Token 优化
+- [[guides/coding-standards]] - 编码规范
+- [[BUG_FIX_LESSONS]] - Bug 修复经验

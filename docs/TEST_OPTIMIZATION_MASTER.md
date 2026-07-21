@@ -828,4 +828,11 @@ pytest -q --tb=line 结果 → 输出格式：
 > 2. **测试文件越大，每次 Claude 读它的 token 越多** — 拆分 + 共享 fixtures 是治本
 > 3. **手工用例是 context 黑洞** — 索引 + 追溯矩阵让 Claude 按需读取
 > 4. **测试数据污染是隐藏杀手** — 自动清理避免"这次跑过不了上次可以"的玄学问题
-> 5. **UI 测试是 token 无底洞** — data-testid + Page Object 让调试成本可控```
+> 5. **UI 测试是 token 无底洞** — data-testid + Page Object 让调试成本可控
+
+## 相关链接
+- [[architecture/overview]] - 系统架构总览
+- [[TOKEN_OPTIMIZATION]] - Token 优化方案
+- [[BUG_FIX_LESSONS]] - Bug 修复经验
+- [[AUDIT_REPORT]] - 安全审计报告
+- [[guides/coding-standards]] - 编码规范

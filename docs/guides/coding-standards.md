@@ -140,3 +140,10 @@ def test_login():
     # 验证
     assert 'token' in response.json
 ```
+
+## 相关链接
+- [[architecture/overview]] - 系统架构总览
+- [[guides/setup]] - 环境搭建
+- [[guides/deployment]] - 部署流程
+- [[BUG_FIX_LESSONS]] - Bug 修复经验
+- [[TEST_OPTIMIZATION_MASTER]] - 测试优化指南

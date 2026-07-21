@@ -133,3 +133,9 @@ tail -f gunicorn.log
 - [ ] 设置自动备份
 - [ ] 配置日志轮转
 - [ ] 测试健康检查端点
+
+## 相关链接
+- [[architecture/overview]] - 系统架构总览
+- [[guides/setup]] - 环境搭建
+- [[guides/coding-standards]] - 编码规范
+- [[ALIYUN_DEPLOY]] - 阿里云部署指南

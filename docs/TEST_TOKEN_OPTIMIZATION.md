@@ -533,3 +533,10 @@ pytest tests/test_overtime.py --cov=app --cov-report=term-missing -q
 > 💡 **测试架构师的核心洞察：** 测试活动的 token 浪费主要不在"写测试"，而在"调试循环"。
 > 80% 的 token 花在反复读代码、反复猜测、反复修改上。
 > 省 token 的最强手段是：**精确给定位（file:line）+ 控制范围（只读什么）+ 复用之前的结果（不重复读）**。
+
+## 相关链接
+- [[architecture/overview]] - 系统架构总览
+- [[TOKEN_OPTIMIZATION]] - Token 优化方案
+- [[TEST_OPTIMIZATION_MASTER]] - 测试优化指南
+- [[guides/coding-standards]] - 编码规范
+- [[BUG_FIX_LESSONS]] - Bug 修复经验

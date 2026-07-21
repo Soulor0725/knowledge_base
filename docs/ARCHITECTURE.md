@@ -463,3 +463,15 @@
 - [ ] Elasticsearch全文搜索
 - [ ] Docker容器化部署
 - [ ] CI/CD自动化流程
+
+## 相关链接
+- [[architecture/overview]] - 架构概览（简版）
+- [[modules/auth]] - 认证模块
+- [[modules/articles]] - 文章模块
+- [[modules/kiwi-sales]] - 猕猴桃销售模块
+- [[modules/overtime]] - 加班记录模块
+- [[modules/expenses]] - 记账模块
+- [[decisions/001-use-flask]] - 选择 Flask 框架
+- [[decisions/002-sqlite-choice]] - 选择 SQLite
+- [[ALIYUN_DEPLOY]] - 阿里云部署指南
+- [[guides/deployment]] - 部署流程

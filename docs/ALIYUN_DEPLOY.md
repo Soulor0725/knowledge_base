@@ -267,3 +267,8 @@ top -u www-data
 | 域名（.com） | 30-60 元/年（可选） |
 | HTTPS 证书 | 免费（Let's Encrypt） |
 | **合计** | **最低 60 元/年** |
+
+## 相关链接
+- [[architecture/overview]] - 系统架构总览
+- [[guides/deployment]] - 部署流程
+- [[guides/setup]] - 环境搭建

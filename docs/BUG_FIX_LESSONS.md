@@ -317,3 +317,13 @@
 3. SELECT+INSERT 竞态无 IntegrityError 兜底
 4. innerHTML 直接插用户值无 escapeHtml
 5. 异常字符串返回客户端
+
+## 相关链接
+- [[architecture/overview]] - 系统架构总览
+- [[modules/auth]] - 认证模块
+- [[modules/articles]] - 文章模块
+- [[modules/kiwi-sales]] - 猕猴桃销售模块
+- [[modules/overtime]] - 加班记录模块
+- [[modules/expenses]] - 记账模块
+- [[TEST_OPTIMIZATION_MASTER]] - 测试优化指南
+- [[AUDIT_REPORT]] - 安全审计报告

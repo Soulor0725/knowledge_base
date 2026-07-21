@@ -184,3 +184,12 @@ CREATE INDEX idx_expenses_user_month ON expenses(user_id, substr(date, 6, 2));
 ## 相关文件
 - `routes/expenses.py` - 路由实现 (275行)
 - `config.py` - `EXPENSE_CATEGORIES` 常量
+
+## 相关链接
+- [[architecture/overview]] - 系统架构总览
+- [[modules/auth]] - 认证模块（用户隔离）
+- [[modules/articles]] - 文章模块
+- [[modules/kiwi-sales]] - 猕猴桃销售模块
+- [[modules/overtime]] - 加班记录模块
+- [[BUG_FIX_LESSONS]] - Bug 修复经验（含记账相关）
+- [[guides/coding-standards]] - 编码规范

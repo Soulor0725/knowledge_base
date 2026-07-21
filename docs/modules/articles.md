@@ -193,3 +193,12 @@ CREATE INDEX idx_articles_user_updated ON articles(user_id, updated_at DESC);
 ## 相关文件
 - `routes/articles.py` - 路由实现 (420行)
 - `cache.py` - 缓存管理
+
+## 相关链接
+- [[architecture/overview]] - 系统架构总览
+- [[modules/auth]] - 认证模块（用户隔离）
+- [[modules/kiwi-sales]] - 猕猴桃销售模块
+- [[modules/overtime]] - 加班记录模块
+- [[modules/expenses]] - 记账模块
+- [[BUG_FIX_LESSONS]] - Bug 修复经验（含文章相关）
+- [[INTERACTION_DESIGN]] - 交互设计（含文章列表）

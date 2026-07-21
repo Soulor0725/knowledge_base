@@ -166,3 +166,12 @@ CREATE UNIQUE INDEX idx_overtime_user_date ON overtime_records(user_id, date);
 ## 相关文件
 - `routes/overtime.py` - 路由实现 (280行)
 - `static/index.html` - 前端组件（时间选择器、表单、列表）
+
+## 相关链接
+- [[architecture/overview]] - 系统架构总览
+- [[modules/auth]] - 认证模块（用户隔离）
+- [[modules/articles]] - 文章模块
+- [[modules/kiwi-sales]] - 猕猴桃销售模块
+- [[modules/expenses]] - 记账模块
+- [[BUG_FIX_LESSONS]] - Bug 修复经验（含加班相关）
+- [[INTERACTION_DESIGN]] - 交互设计（含时间选择器）
