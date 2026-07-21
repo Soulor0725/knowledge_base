@@ -4,9 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Echo</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/easymde@2.18.0/dist/easymde.min.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css">
+    <link rel="stylesheet" href="lib/css/inter-local.css">
+    <link rel="stylesheet" href="lib/css/easymde.min.css">
+    <link rel="stylesheet" href="lib/css/font-awesome.min.css">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -2016,22 +2016,22 @@
 
 
 
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/lib/codemirror.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/mode/markdown/markdown.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/mode/python/python.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/mode/javascript/javascript.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/mode/htmlmixed/htmlmixed.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/mode/css/css.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/addon/edit/matchbrackets.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/addon/edit/closebrackets.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/addon/fold/foldcode.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/addon/fold/foldgutter.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/addon/fold/brace-fold.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/addon/fold/markdown-fold.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/easymde@2.18.0/dist/easymde.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js"></script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css">
-    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+    <script src="lib/js/codemirror.min.js"></script>
+    <script src="lib/js/markdown.min.js"></script>
+    <script src="lib/js/python.min.js"></script>
+    <script src="lib/js/javascript.min.js"></script>
+    <script src="lib/js/htmlmixed.min.js"></script>
+    <script src="lib/js/css.min.js"></script>
+    <script src="lib/js/matchbrackets.min.js"></script>
+    <script src="lib/js/closebrackets.min.js"></script>
+    <script src="lib/js/foldcode.min.js"></script>
+    <script src="lib/js/foldgutter.min.js"></script>
+    <script src="lib/js/brace-fold.min.js"></script>
+    <script src="lib/js/markdown-fold.min.js"></script>
+    <script src="lib/js/easymde.min.js"></script>
+    <script src="lib/js/marked.min.js"></script>
+    <link rel="stylesheet" href="lib/css/github-dark.min.css">
+    <script src="lib/js/highlight.min.js"></script>
     <script>
         // If hljs is available, run a global highlight pass after load
         if (typeof hljs !== 'undefined' && typeof hljs.highlightAll === 'function') {
@@ -6040,7 +6040,7 @@ function openProfileModal() {
             // 确保 Marked.js 已加载
             if (typeof marked === 'undefined') {
                 const script = document.createElement('script');
-                script.src = 'https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js';
+                script.src = 'lib/js/marked.min.js';
                 script.onload = function() {
                     renderArticle(id);
                 };
