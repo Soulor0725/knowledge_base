@@ -1,8 +1,37 @@
 """Echo 智慧管理中心 - Flask 应用入口"""
 import logging
-from flask import Flask, send_from_directory
+from flask import Flask, send_from_directory, Response
 from flask_cors import CORS
 from flask_compress import Compress
+from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
+
+# ---- Prometheus 指标定义 ----
+HTTP_REQUESTS_TOTAL = Counter(
+    'http_requests_total',
+    'HTTP 请求总数',
+    ['method', 'endpoint', 'status']
+)
+HTTP_REQUEST_DURATION = Histogram(
+    'http_request_duration_seconds',
+    'HTTP 请求耗时（秒）',
+    ['method', 'endpoint'],
+    buckets=[0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]
+)
+DB_QUERY_DURATION = Histogram(
+    'db_query_duration_seconds',
+    '数据库查询耗时（秒）',
+    ['operation'],
+    buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0]
+)
+ACTIVE_REQUESTS = Gauge(
+    'active_requests',
+    '当前活跃请求数'
+)
+APP_INFO = Gauge(
+    'app_info',
+    '应用信息',
+    ['version', 'environment']
+)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
@@ -91,6 +120,28 @@ def create_app():
             response.headers['X-Response-Time'] = f'{elapsed*1000:.1f}ms'
             if elapsed > 1.0:
                 logger.warning(f'慢请求: {request.method} {request.path} 耗时 {elapsed:.2f}s')
+
+            # Prometheus 指标采集（排除 /metrics 自身和静态资源）
+            if not request.path.startswith('/static/') and request.path != '/metrics':
+                endpoint = request.endpoint or request.path
+                HTTP_REQUESTS_TOTAL.labels(
+                    method=request.method,
+                    endpoint=endpoint,
+                    status=response.status_code
+                ).inc()
+                HTTP_REQUEST_DURATION.labels(
+                    method=request.method,
+                    endpoint=endpoint
+                ).observe(elapsed)
+        return response
+
+    @app.before_request
+    def before_request_active():
+        ACTIVE_REQUESTS.inc()
+
+    @app.after_request
+    def after_request_active(response):
+        ACTIVE_REQUESTS.dec()
         return response
 
     # 数据库连接管理
@@ -115,6 +166,14 @@ def create_app():
         except Exception as e:
             logger.error(f'数据库连接失败: {e}')
             return jsonify({'status': 'error', 'db': 'unavailable'}), 503
+
+    # Prometheus 指标端点
+    APP_INFO.labels(version='2.5.7', environment='production').inc()
+
+    @app.route('/metrics')
+    def metrics():
+        """Prometheus 指标端点"""
+        return Response(generate_latest(), mimetype=CONTENT_TYPE_LATEST)
 
     # 注册蓝图
     from routes import auth_bp, articles_bp, kiwi_sales_bp, overtime_bp, expenses_bp

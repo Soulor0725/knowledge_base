@@ -3,3 +3,4 @@ Flask-CORS==4.0.0
 Flask-Compress==1.15
 PyJWT>=2.9.0
 passlib==1.7.4
+prometheus_client==0.21.0

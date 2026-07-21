@@ -221,6 +221,27 @@
             color: white;
             font-weight: 600;
         }
+        /* 底部版权栏 */
+        .app-footer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 24px;
+            background: rgba(15, 23, 42, 0.95);
+            border-top: 1px solid rgba(148, 163, 184, 0.15);
+            color: #94a3b8;
+            font-size: 14px;
+            z-index: 1000;
+        }
+        .footer-divider {
+            color: rgba(148, 163, 184, 0.4);
+            margin: 0 4px;
+        }
         
         /* 确保代码块在预览模式中也有高亮 */
         .editor-preview pre {
@@ -703,6 +724,7 @@
         }
         .content-area {
             flex: 1;
+            padding-bottom: 40px;
         }
         .toolbar {
             background: rgba(30, 41, 59, 0.6);
@@ -1604,6 +1626,12 @@
             <div id="articleList"></div>
         </main>
     </div>
+
+    <footer class="app-footer" id="appFooter">
+        <span>版权所有&copy;condidence 保留所有权限</span>
+        <span class="footer-divider">|</span>
+        <span id="footerDateTime"></span>
+    </footer>
 
     <div id="loginModal" class="modal">
         <div class="modal-content" style="max-width: 420px;">
@@ -2650,6 +2678,21 @@ function openProfileModal() {
                     this.style.background = 'transparent';
                 });
             });
+
+            // 底部版权栏实时时间
+            function updateFooterTime() {
+                const now = new Date();
+                const y = now.getFullYear();
+                const m = String(now.getMonth() + 1).padStart(2, '0');
+                const d = String(now.getDate()).padStart(2, '0');
+                const h = String(now.getHours()).padStart(2, '0');
+                const min = String(now.getMinutes()).padStart(2, '0');
+                const s = String(now.getSeconds()).padStart(2, '0');
+                const el = document.getElementById('footerDateTime');
+                if (el) el.textContent = `${y}/${m}/${d} ${h}:${min}:${s}`;
+            }
+            updateFooterTime();
+            setInterval(updateFooterTime, 1000);
         });
 
         async function loadArticles() {
@@ -2781,7 +2824,7 @@ function openProfileModal() {
                 </div>
             `;
             }).join('') + `
-                <div class="pagination" style="
+                <div class="pagination" id="articlePagination" style="
                     margin-top: 20px;
                     display: flex;
                     justify-content: center;
@@ -2792,13 +2835,8 @@ function openProfileModal() {
                     border-radius: 8px;
                     border: 1px solid rgba(148, 163, 184, 0.1);
                 ">
-                    ${renderPagination()}
                 </div>
             `;
-            updateSelectedCount();
-        }
-        
-        function renderPagination() {
             renderPaginationComponent({
                 containerId: 'articlePagination',
                 total: totalArticles,
@@ -2808,6 +2846,7 @@ function openProfileModal() {
                 onPageSizeChange: changeArticlePageSize,
                 itemName: '篇'
             });
+            updateSelectedCount();
         }
 
         function changeArticlePageSize(size) {
@@ -3007,7 +3046,6 @@ function openProfileModal() {
                 totalArticles = result.total || 0;
                 currentView = 'search';
                 renderArticles(articles);
-                renderPagination();
             } catch (error) { 
                 console.error('搜索失败:', error);
                 const articleList = _$('articleList');
@@ -3882,7 +3920,7 @@ function openProfileModal() {
                         </div>
                         <div id="expenseTableBody"></div>
                     </div>
-                    <div id="expensePagination" style="display:flex;justify-content:center;align-items:center;gap:6px;margin-top:16px;flex-wrap:wrap;"></div>
+                    <div id="expensePagination" class="pagination" style="display:flex;justify-content:center;align-items:center;gap:8px;margin-top:16px;padding:12px;background:rgba(30,41,59,0.5);border-radius:8px;border:1px solid rgba(148,163,184,0.1);"></div>
                 </div>
             `;
             expenseDateFilter = defaultDate;
@@ -4691,7 +4729,7 @@ function openProfileModal() {
                         </div>
                         <div id="overtimeTableBody"></div>
                     </div>
-                    <div id="overtimePagination" style="display:flex;justify-content:center;align-items:center;gap:6px;margin-top:16px;flex-wrap:wrap;"></div>
+                    <div id="overtimePagination" class="pagination" style="display:flex;justify-content:center;align-items:center;gap:8px;margin-top:16px;padding:12px;background:rgba(30,41,59,0.5);border-radius:8px;border:1px solid rgba(148,163,184,0.1);"></div>
                 </div>
             `;
             loadOvertimeRecords();

@@ -124,6 +124,12 @@ python test_api.py               # smoke test, server must run on localhost:5001
 - **修复**: 将分钟下拉框改为 00-59 全部选项，覆盖所有可能的分钟值
 - **规则**: 下拉框选项必须覆盖数据库中所有可能的值；修改下拉选项后需验证已有数据能正确回显
 
+### 2026-07-21 模板字符串中调用无返回值函数显示 undefined
+- **现象**: 工作日报列表底部显示 "undefined" 文本
+- **根因**: `renderPagination()` 在模板字符串 `${renderPagination()}` 中被调用，但该函数没有 `return` 语句，JS 将 `undefined` 转为字符串渲染
+- **修复**: 将分页容器改为有 `id` 的独立元素，在 `innerHTML` 设置后调用 `renderPaginationComponent()` 直接操作 DOM
+- **规则**: 在模板字符串中调用的函数**必须有返回值**；分页等需要操作 DOM 的逻辑应在 `innerHTML` 赋值后执行
+
 ## 架构风险预警
 ### 并发安全
 - 全局 `dict`（`login_attempts`, `_stats_cache` 等）在 `threaded=True` 下**必须加锁**，否则并发读写会崩溃

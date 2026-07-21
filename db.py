@@ -1,19 +1,103 @@
 """数据库管理模块"""
 import sqlite3
+import time
+import sys
 from flask import g
 from config import DATABASE
+
+
+def _get_db_metrics():
+    """延迟加载 Prometheus 指标"""
+    # 从已加载的 app 模块中获取，避免循环导入
+    # 注意: 直接运行 python app.py 时模块名为 __main__
+    for name in ('app', '__main__'):
+        mod = sys.modules.get(name)
+        if mod and hasattr(mod, 'DB_QUERY_DURATION'):
+            return mod.DB_QUERY_DURATION
+    # fallback: 返回一个空操作对象
+    class _NullMetrics:
+        def labels(self, **kwargs):
+            return self
+        def observe(self, value):
+            pass
+    return _NullMetrics()
+
+
+class MonitoredCursor:
+    """自动记录耗时的 Cursor 包装器"""
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    def execute(self, operation, parameters=()):
+        # 排除 PRAGMA 等初始化语句
+        if operation.strip().upper().startswith(('PRAGMA', 'BEGIN', 'COMMIT', 'ROLLBACK')):
+            return self._cursor.execute(operation, parameters)
+
+        start = time.perf_counter()
+        try:
+            return self._cursor.execute(operation, parameters)
+        finally:
+            elapsed = time.perf_counter() - start
+            operation_type = operation.strip().split()[0].upper()
+            _get_db_metrics().labels(operation=operation_type).observe(elapsed)
+
+    def executemany(self, operation, seq_of_parameters):
+        start = time.perf_counter()
+        try:
+            return self._cursor.executemany(operation, seq_of_parameters)
+        finally:
+            elapsed = time.perf_counter() - start
+            operation_type = operation.strip().split()[0].upper()
+            _get_db_metrics().labels(operation=operation_type).observe(elapsed)
+
+    def fetchone(self):
+        return self._cursor.fetchone()
+
+    def fetchall(self):
+        return self._cursor.fetchall()
+
+    def __getattr__(self, name):
+        return getattr(self._cursor, name)
+
+
+class MonitoredConnection:
+    """自动监控 Cursor 的 Connection 包装器"""
+    def __init__(self, conn):
+        self._conn = conn
+
+    def execute(self, operation, parameters=()):
+        start = time.perf_counter()
+        try:
+            return self._conn.execute(operation, parameters)
+        finally:
+            elapsed = time.perf_counter() - start
+            operation_type = operation.strip().split()[0].upper()
+            _get_db_metrics().labels(operation=operation_type).observe(elapsed)
+
+    def cursor(self):
+        return MonitoredCursor(self._conn.cursor())
+
+    def commit(self):
+        return self._conn.commit()
+
+    def close(self):
+        return self._conn.close()
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
 
 
 def get_db():
     """获取数据库连接"""
     if 'db' not in g:
-        g.db = sqlite3.connect(DATABASE, check_same_thread=False)
-        g.db.row_factory = sqlite3.Row
-        g.db.execute("PRAGMA foreign_keys = ON")
-        g.db.execute("PRAGMA journal_mode = WAL")
-        g.db.execute("PRAGMA busy_timeout = 5000")
-        g.db.execute("PRAGMA wal_autocheckpoint = 500")
-        g.db.execute("PRAGMA synchronous = NORMAL")
+        raw_conn = sqlite3.connect(DATABASE, check_same_thread=False)
+        raw_conn.row_factory = sqlite3.Row
+        raw_conn.execute("PRAGMA foreign_keys = ON")
+        raw_conn.execute("PRAGMA journal_mode = WAL")
+        raw_conn.execute("PRAGMA busy_timeout = 5000")
+        raw_conn.execute("PRAGMA wal_autocheckpoint = 500")
+        raw_conn.execute("PRAGMA synchronous = NORMAL")
+        g.db = MonitoredConnection(raw_conn)
     return g.db
 
 
