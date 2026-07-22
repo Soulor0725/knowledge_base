@@ -2,11 +2,32 @@
 
 ## 当前版本
 
-**v2.6.0**
+**v2.6.1**
 
 ---
 
 ## 版本历史
+
+---
+
+### v2.6.1 - 2026-07-22
+
+#### 🐛 Bug 修复
+- **修复断网后图标显示为 X 的问题**
+  - 原因：弹窗关闭按钮使用 Unicode 字符 `✕`（U+2715），本地 Inter 字体不支持该字符，断网时无法回退到 CDN 字体，显示为 X
+  - 修复：将 7 个弹窗关闭按钮全部替换为 Font Awesome 的 `<i class="fa fa-times"></i>` 图标，使用本地字体渲染
+  - 影响：loginModal、profileModal、kiwiSalesModal、overtimeModal、expenseModal、articleModal、categoryModal
+- **修复工作日报列表日期时间折行问题**
+  - 原因：`formatDate()` 输出 `YYYY-MM-DD HH:mm:ss`（19字符），发布时间列仅 `flex: 1` 空间不足
+  - 修复：日期列 `flex` 从 `1` 增至 `1.5`，并添加 `white-space: nowrap` 禁止换行
+
+#### 🏗️ 架构改进
+- **前端资源完全本地化**：CSS/JS/字体全部从 CDN 切换至本地 `static/vendor/`，系统可完全离线运行
+  - 静态资源清单：CodeMirror + modes/addons、EasyMDE、Marked.js、Highlight.js、Font Awesome 4.7.0、Inter 字体（5 weights）
+  - 所有资源经 curl 验证 HTTP 200 + 正确 MIME 类型
+
+#### 📝 经验沉淀
+- `Bug #16` 沉淀至 `docs/BUG_FIX_LESSONS.md`，覆盖：本地字体缺失字符的识别与修复、flex 布局列宽不足导致折行的调试方法
 
 ---
 

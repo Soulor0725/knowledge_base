@@ -318,6 +318,53 @@
 4. innerHTML 直接插用户值无 escapeHtml
 5. 异常字符串返回客户端
 
+### 🟡 前端资源本地化陷阱
+
+- **Bug #16：本地字体缺失字符导致图标显示为 X**
+  - **版本**：v2.6.1
+  - **现象**：断网后弹窗关闭按钮显示为 X 形，编辑/删除等图标按钮异常
+  - **根因**：关闭按钮使用 Unicode 字符 `✕`（U+2715 MULTIPLICATION X），本地 Inter 字体**不包含该字形**。CDN 在线时可回退到 Google Fonts 渲染，断网时回退到系统字体显示为 X
+  - **修复**：
+    ```html
+    <!-- 前 -->
+    <button class="close-btn">✕</button>
+    <!-- 后 -->
+    <button class="close-btn"><i class="fa fa-times"></i></button>
+    ```
+    使用 Font Awesome 字体图标（`\f00d`），本地 `fontawesome-webfont.woff2` 包含该字形
+  - **教训**：
+    - **所有** UI 图标必须通过图标字体（Font Awesome）渲染，不能依赖 Unicode 特殊符号
+    - 搜索关键词：`✕` `✖` `×` `⨯` `🗙` `🗴` → 全部替换为 `fa-times` / `fa-close`
+    - 本地化前必须**断网测试**所有页面，确认无 CDN 回退依赖
+    - **新增检查清单项**：搜 HTML 中所有非 ASCII 符号 → 确认本地字体包含该字形
+  - **验证方法**：
+    ```bash
+    # 1. 断开网络
+    # 2. 启动服务
+    python app.py
+    # 3. 浏览器访问 http://localhost:5001
+    # 4. 检查所有图标按钮是否正常显示
+    ```
+
+### 🟡 flex 布局列宽不足导致折行
+
+- **Bug #17：日期时间列折行**
+  - **版本**：v2.6.1
+  - **现象**：工作日报列表第一条日期时间列换行显示
+  - **根因**：`formatDate()` 输出 `YYYY-MM-DD HH:mm:ss`（19字符），但列只分配 `flex: 1`，空间不足
+  - **修复**：
+    ```html
+    <!-- 前 -->
+    <div class="main-article-date" style="flex: 1; ...">
+    <!-- 后 -->
+    <div class="main-article-date" style="flex: 1.5; ...; white-space: nowrap;">
+    ```
+  - **教训**：
+    - 日期时间列**至少**需要 `flex: 1.5` 或 `min-width: 150px`
+    - 包含时分秒的列**必须**设置 `white-space: nowrap`
+    - 搜索关键词：`formatDate` → 确认每个调用点的列宽足够
+    - **新增检查清单项**：表格列显示 `HH:mm:ss` 格式时，列宽 ≥ 1.5fr 且 nowrap
+
 ## 相关链接
 - [[architecture/overview]] - 系统架构总览
 - [[modules/auth]] - 认证模块

@@ -5,8 +5,8 @@
 
 ## 当前版本
 
-**v2.6.0**
-> 修复：工作日报列表底部显示 undefined；统一所有分页样式；新增底部版权栏和实时时间显示。
+**v2.6.1**
+> 修复：断网后图标显示为 X；工作日报列表日期时间折行。前端资源完全本地化，可离线运行。
 
 ## ✨ 功能特性
 
@@ -71,10 +71,12 @@
 - **后端**：Python Flask（模块化架构，Blueprint）
 - **前端**：HTML5, CSS3, JavaScript（SPA）
 - **数据库**：SQLite（WAL 模式）
-- **Markdown 解析**：Marked.js
-- **代码高亮**：CodeMirror + highlight.js
-- **图标**：Font Awesome
+- **Markdown 解析**：Marked.js（本地）
+- **代码高亮**：CodeMirror + highlight.js（本地）
+- **图标**：Font Awesome 4.7.0（本地）
+- **字体**：Inter（本地，5 weights）
 - **知识库**：Obsidian
+- **离线运行**：所有静态资源本地化，无需外网
 
 ## 📦 安装步骤
 
@@ -213,6 +215,10 @@ knowledge_base/
 ├── static/
 │   ├── index.html             # 前端单文件 SPA（~6000 行）
 │   ├── favicon.ico
+│   ├── vendor/                # 本地化静态资源（CSS/JS/字体）
+│   │   ├── css/               # easymde、font-awesome、github-dark、inter
+│   │   ├── js/                # codemirror + modes/addons、easymde、marked、highlight
+│   │   └── fonts/             # Font Awesome 字体（woff2/woff/ttf/eot/svg）、Inter（5 weights）
 │   └── uploads/               # 用户上传的图片（png/jpg/webp）
 ├── docs/                      # Obsidian 知识库（已 git 追踪）
 │   ├── index.md               # 知识库首页
@@ -275,7 +281,7 @@ knowledge_base/
 
 ## 📝 版本历史
 
-完整版本历史请查看 [VERSION.md](VERSION.md)（v1.0.0 → v2.5.8）。
+完整版本历史请查看 [VERSION.md](VERSION.md)（v1.0.0 → v2.6.1）。
 发布说明（v2.1.0 → v2.2.1）另见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
 
 ## 🔧 配置说明

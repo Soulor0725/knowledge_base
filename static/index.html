@@ -4,9 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Echo</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/easymde@2.18.0/dist/easymde.min.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css">
+    <link href="/static/vendor/css/inter.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/vendor/css/easymde.min.css">
+    <link rel="stylesheet" href="/static/vendor/css/font-awesome.min.css">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -1332,6 +1332,9 @@
             cursor: pointer;
             color: #94a3b8;
             transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
         .close-btn:hover {
             background: rgba(255,255,255,0.1);
@@ -1637,7 +1640,7 @@
         <div class="modal-content" style="max-width: 420px;">
             <div class="modal-header">
                 <h2 id="loginModalTitle">登录</h2>
-                <button class="close-btn" onclick="closeLoginModal()">✕</button>
+                <button class="close-btn" onclick="closeLoginModal()"><i class="fa fa-times"></i></button>
             </div>
             <div class="login-tabs">
                 <button class="tab-btn active" onclick="switchTab('login')">登录</button>
@@ -1681,7 +1684,7 @@
         <div class="modal-content" style="max-width: 500px;">
             <div class="modal-header">
                 <h2>编辑资料</h2>
-                <button class="close-btn" onclick="closeModal('profileModal')">✕</button>
+                <button class="close-btn" onclick="closeModal('profileModal')"><i class="fa fa-times"></i></button>
             </div>
             <form id="profileForm" onsubmit="updateProfile(event)">
                 <div class="form-group">
@@ -1735,7 +1738,7 @@
         <div class="modal-content" style="max-width: 800px;">
             <div class="modal-header">
                 <h2 id="kiwiSalesModalTitle">新增订单</h2>
-                <button class="close-btn" onclick="closeKiwiSalesModal()">✕</button>
+                <button class="close-btn" onclick="closeKiwiSalesModal()"><i class="fa fa-times"></i></button>
             </div>
             <form id="kiwiSalesForm" onsubmit="saveKiwiSale(event)">
                 <input type="hidden" id="kiwiSaleId">
@@ -1795,7 +1798,7 @@
         <div class="modal-content" style="max-width: 500px;">
             <div class="modal-header">
                 <h2 id="overtimeModalTitle">新增加班记录</h2>
-                <button class="close-btn" onclick="closeOvertimeModal()">✕</button>
+                <button class="close-btn" onclick="closeOvertimeModal()"><i class="fa fa-times"></i></button>
             </div>
             <form id="overtimeForm" onsubmit="saveOvertimeRecord(event)">
                 <input type="hidden" id="overtimeRecordId">
@@ -1906,7 +1909,7 @@
         <div class="modal-content" style="max-width: 500px;">
             <div class="modal-header">
                 <h2 id="expenseModalTitle">新增消费记录</h2>
-                <button class="close-btn" onclick="closeExpenseModal()">✕</button>
+                <button class="close-btn" onclick="closeExpenseModal()"><i class="fa fa-times"></i></button>
             </div>
             <form id="expenseForm" onsubmit="saveExpense(event)">
                 <input type="hidden" id="expenseId">
@@ -1951,7 +1954,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2 id="modalTitle">新增文章</h2>
-                <button class="close-btn" onclick="closeModal()">✕</button>
+                <button class="close-btn" onclick="closeModal()"><i class="fa fa-times"></i></button>
             </div>
             <form id="articleForm" onsubmit="saveArticle(event)">
                 <input type="hidden" id="articleId">
@@ -1992,7 +1995,7 @@
         <div class="modal-content" style="max-width: 420px;">
             <div class="modal-header">
                 <h2>添加分类</h2>
-                <button class="close-btn" onclick="closeCategoryModal()">✕</button>
+                <button class="close-btn" onclick="closeCategoryModal()"><i class="fa fa-times"></i></button>
             </div>
             <form id="categoryForm" onsubmit="saveCategory(event)">
                 <div class="form-group">
@@ -2016,22 +2019,22 @@
 
 
 
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/lib/codemirror.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/mode/markdown/markdown.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/mode/python/python.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/mode/javascript/javascript.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/mode/htmlmixed/htmlmixed.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/mode/css/css.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/addon/edit/matchbrackets.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/addon/edit/closebrackets.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/addon/fold/foldcode.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/addon/fold/foldgutter.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/addon/fold/brace-fold.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/addon/fold/markdown-fold.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/easymde@2.18.0/dist/easymde.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js"></script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css">
-    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+    <script src="/static/vendor/js/codemirror.min.js"></script>
+    <script src="/static/vendor/js/markdown.min.js"></script>
+    <script src="/static/vendor/js/python.min.js"></script>
+    <script src="/static/vendor/js/javascript.min.js"></script>
+    <script src="/static/vendor/js/htmlmixed.min.js"></script>
+    <script src="/static/vendor/js/css.min.js"></script>
+    <script src="/static/vendor/js/matchbrackets.min.js"></script>
+    <script src="/static/vendor/js/closebrackets.min.js"></script>
+    <script src="/static/vendor/js/foldcode.min.js"></script>
+    <script src="/static/vendor/js/foldgutter.min.js"></script>
+    <script src="/static/vendor/js/brace-fold.min.js"></script>
+    <script src="/static/vendor/js/markdown-fold.min.js"></script>
+    <script src="/static/vendor/js/easymde.min.js"></script>
+    <script src="/static/vendor/js/marked.min.js"></script>
+    <link rel="stylesheet" href="/static/vendor/css/github-dark.min.css">
+    <script src="/static/vendor/js/highlight.min.js"></script>
     <script>
         // If hljs is available, run a global highlight pass after load
         if (typeof hljs !== 'undefined' && typeof hljs.highlightAll === 'function') {
@@ -2773,7 +2776,7 @@ function openProfileModal() {
                     <div class="main-header-index" style="flex: 1; text-align: center; font-weight: 600; color: #cbd5e1; font-size: 13px;">序号</div>
                     <div class="main-header-title" style="flex: 1.5; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: left; padding: 0 5px;">标题</div>
                     <div class="main-header-category" style="flex: 1; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">分类</div>
-                    <div class="main-header-date" style="flex: 1; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">发布时间</div>
+                    <div class="main-header-date" style="flex: 1.5; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center; white-space: nowrap;">发布时间</div>
                     <div class="main-header-views" style="flex: 1; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">阅读次数</div>
                     <div class="main-header-actions" style="flex: 1; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">操作</div>
                 </div>
@@ -2787,7 +2790,7 @@ function openProfileModal() {
                     <div class="main-article-index" style="flex: 1; text-align: center; color: #94a3b8; font-size: 12px;">${articleIndex}</div>
                     <div class="main-article-title" onclick="viewArticle(${article.id})" style="flex: 1.5; cursor: pointer; color: #e2e8f0; font-size: 14px; font-weight: 500; padding: 0 5px; text-align: left;">${escapeHtml(article.title)}</div>
                     <div class="main-article-category" style="flex: 1; color: #94a3b8; font-size: 12px; text-align: center;">${escapeHtml(article.category || '未分类')}</div>
-                    <div class="main-article-date" style="flex: 1; color: #94a3b8; font-size: 12px; text-align: center;">${formatDate(article.updated_at)}</div>
+                    <div class="main-article-date" style="flex: 1.5; color: #94a3b8; font-size: 12px; text-align: center; white-space: nowrap;">${formatDate(article.updated_at)}</div>
                     <div class="main-article-views-count" style="flex: 1; color: #94a3b8; font-size: 12px; text-align: center;">
                         <i class="fa fa-eye" style="font-size: 11px; margin-right: 2px;"></i> ${article.views || 0}
                     </div>
@@ -6040,7 +6043,7 @@ function openProfileModal() {
             // 确保 Marked.js 已加载
             if (typeof marked === 'undefined') {
                 const script = document.createElement('script');
-                script.src = 'https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js';
+                script.src = '/static/vendor/js/marked.min.js';
                 script.onload = function() {
                     renderArticle(id);
                 };

@@ -168,7 +168,7 @@ def create_app():
             return jsonify({'status': 'error', 'db': 'unavailable'}), 503
 
     # Prometheus 指标端点
-    APP_INFO.labels(version='2.5.7', environment='production').inc()
+    APP_INFO.labels(version='2.6.1', environment='production').inc()
 
     @app.route('/metrics')
     def metrics():
