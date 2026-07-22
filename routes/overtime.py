@@ -296,11 +296,20 @@ def get_overtime_monthly_stats():
     except ValueError:
         return jsonify({'error': '月份格式错误，请使用 YYYY-MM'}), 400
 
-    # 统计周期：上月21日 到 本月20日（含）
-    period_start_month = target.month - 1 if target.month > 1 else 12
-    period_start_year = target.year if target.month > 1 else target.year - 1
+    # 工资压一个月：统计周期为前两个月21日 到 前一个月20日（含）
+    # 例如：9月对应 7月21日 ~ 8月20日
+    period_start_month = target.month - 2
+    period_start_year = target.year
+    if period_start_month <= 0:
+        period_start_month += 12
+        period_start_year -= 1
+    period_end_month = target.month - 1
+    period_end_year = target.year
+    if period_end_month <= 0:
+        period_end_month += 12
+        period_end_year -= 1
     period_start = f"{period_start_year}-{period_start_month:02d}-21"
-    period_end = f"{target.year}-{target.month:02d}-20"
+    period_end = f"{period_end_year}-{period_end_month:02d}-20"
 
     db = get_db()
     cursor = db.cursor()

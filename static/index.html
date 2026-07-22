@@ -4680,15 +4680,15 @@ function openProfileModal() {
             document.getElementById('articleList').innerHTML = `
                 <div id="overtimeSection" style="padding: 20px;">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-                        <h2 style="color:#94a3b8;margin:0;font-size:18px;text-align:center;flex:1;font-weight:500;"><i class="fa fa-clock-o" style="color:#f472b6;margin-right:8px;"></i> 加班记录管理</h2>
-                        <div style="margin-left:20px;display:flex;gap:8px;">
-                            <button class="btn btn-secondary" onclick="openOvertimeModal()" style="padding:12px 24px;border:1px solid rgba(148,163,184,0.1);background:rgba(255,255,255,0.05);color:#cbd5e1;border-radius:12px;cursor:pointer;font-size:14px;font-weight:600;transition:all 0.3s ease;">+ 新增记录</button>
-                        </div>
+                        <h2 style="color:#94a3b8;margin:0;font-size:18px;font-weight:500;"><i class="fa fa-clock-o" style="color:#f472b6;margin-right:8px;"></i> 加班记录管理</h2>
                     </div>
                     <div id="overtimeStats" style="margin-bottom:20px;"></div>
-                    <div style="display:flex;gap:0;margin-bottom:20px;border-bottom:1px solid rgba(148,163,184,0.15);">
-                        <button onclick="switchOvertimeTab('records')" id="overtimeTabRecords" style="padding:10px 20px;border:none;background:none;color:#f472b6;font-size:13px;font-weight:600;border-bottom:2px solid #f472b6;cursor:pointer;transition:all 0.2s;">加班记录</button>
-                        <button onclick="switchOvertimeTab('monthly')" id="overtimeTabMonthly" style="padding:10px 20px;border:none;background:none;color:#94a3b8;font-size:13px;font-weight:500;border-bottom:2px solid transparent;cursor:pointer;transition:all 0.2s;">月加班统计</button>
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;border-bottom:1px solid rgba(148,163,184,0.15);padding-bottom:0;">
+                        <div style="display:flex;gap:0;">
+                            <button onclick="switchOvertimeTab('records')" id="overtimeTabRecords" style="padding:10px 20px;border:none;background:none;color:#f472b6;font-size:13px;font-weight:600;border-bottom:2px solid #f472b6;cursor:pointer;transition:all 0.2s;">加班记录</button>
+                            <button onclick="switchOvertimeTab('monthly')" id="overtimeTabMonthly" style="padding:10px 20px;border:none;background:none;color:#94a3b8;font-size:13px;font-weight:500;border-bottom:2px solid transparent;cursor:pointer;transition:all 0.2s;">月加班统计</button>
+                        </div>
+                        <button id="overtimeAddBtn" class="btn btn-secondary" onclick="openOvertimeModal()" style="padding:8px 16px;border:1px solid rgba(148,163,184,0.1);background:rgba(255,255,255,0.05);color:#cbd5e1;border-radius:8px;cursor:pointer;font-size:12px;font-weight:500;transition:all 0.3s ease;">+ 新增记录</button>
                     </div>
                     <div id="overtimeTabContent"></div>
                 </div>
@@ -4705,6 +4705,8 @@ function openProfileModal() {
             document.getElementById('overtimeTabMonthly').style.color = tab === 'monthly' ? '#f472b6' : '#94a3b8';
             document.getElementById('overtimeTabMonthly').style.fontWeight = tab === 'monthly' ? '600' : '500';
             document.getElementById('overtimeTabMonthly').style.borderBottom = tab === 'monthly' ? '2px solid #f472b6' : '2px solid transparent';
+            // 月加班统计tab隐藏新增按钮
+            document.getElementById('overtimeAddBtn').style.display = tab === 'records' ? '' : 'none';
             if (tab === 'records') {
                 renderOvertimeRecordsTab();
             } else {
@@ -4740,7 +4742,23 @@ function openProfileModal() {
 
         function renderOvertimeMonthlyTab() {
             const now = new Date();
-            const defaultMonth = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+            // 工资压一个月：每月21日开始统计
+            // 1-20号：属于上月21日到本月20日的周期，统计为下月（当前月+1）
+            // 21-31号：属于本月21日到下月20日的周期，统计为下下月（当前月+2）
+            const day = now.getDate();
+            let statMonth = now.getMonth() + 1; // 当前月份(1-12)
+            let statYear = now.getFullYear();
+            if (day >= 21) {
+                statMonth += 2; // 21-31号：本月21日到下月20日的加班统计为下下月
+            } else {
+                statMonth += 1; // 1-20号：上月21日到本月20日的加班统计为下月
+            }
+            // 处理跨年
+            if (statMonth > 12) {
+                statMonth -= 12;
+                statYear += 1;
+            }
+            const defaultMonth = statYear + '-' + String(statMonth).padStart(2, '0');
             document.getElementById('overtimeTabContent').innerHTML = `
                 <div id="overtimeMonthlyPanel">
                     <div style="display:flex;align-items:center;margin-bottom:20px;gap:10px;">
@@ -4801,7 +4819,20 @@ function openProfileModal() {
 
         function resetOvertimeMonthlyFilter() {
             const now = new Date();
-            const defaultMonth = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+            // 工资压一个月：每月21日开始统计
+            const day = now.getDate();
+            let statMonth = now.getMonth() + 1;
+            let statYear = now.getFullYear();
+            if (day >= 21) {
+                statMonth += 2;
+            } else {
+                statMonth += 1;
+            }
+            if (statMonth > 12) {
+                statMonth -= 12;
+                statYear += 1;
+            }
+            const defaultMonth = statYear + '-' + String(statMonth).padStart(2, '0');
             document.getElementById('overtimeMonthlyFilter').value = defaultMonth;
             loadOvertimeMonthlyStats();
         }
