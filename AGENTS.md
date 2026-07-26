@@ -43,8 +43,8 @@ python test_api.py               # smoke test, server must run on localhost:5001
 - `test_*.py` scripts are gitignored.
 
 ## Overtime Rules
-- Weekday: start 19:00, end 19:00–23:59.
-- Weekend: 08:300–23:59, deduct 12:00–14:00. Same-day unique.
+- Weekday: start 18:30, end 18:30–23:59 (from 2026-07-27; before that: start 19:00)
+- Weekend: 08:30–23:59, deduct 12:00–14:00. Same-day unique.
 - Monthly stats: 20th–20th period.
 
 ## Token-Saving Tips
@@ -129,6 +129,22 @@ python test_api.py               # smoke test, server must run on localhost:5001
 - **根因**: `renderPagination()` 在模板字符串 `${renderPagination()}` 中被调用，但该函数没有 `return` 语句，JS 将 `undefined` 转为字符串渲染
 - **修复**: 将分页容器改为有 `id` 的独立元素，在 `innerHTML` 设置后调用 `renderPaginationComponent()` 直接操作 DOM
 - **规则**: 在模板字符串中调用的函数**必须有返回值**；分页等需要操作 DOM 的逻辑应在 `innerHTML` 赋值后执行
+
+### 2026-07-25 加班结束时间选择器选项写死导致周末加班无法选早于19点的时间
+- **现象**: 周末加班结束时间只能选19-23点，无法选08-18点
+- **根因**: HTML中结束时间的小时select选项硬编码为19-23，只适用于平时加班（19:00起），未根据加班类型动态切换
+- **修复**: 新增`buildHourOptions()`函数动态生成选项，`onOvertimeTypeChange()`根据类型重建开始/结束时间的小时选项（weekday=19-23, weekend=8-23），并同步hidden input值到select
+- **规则**: 下拉框选项必须覆盖所有业务场景的可能值；涉及条件切换的UI应使用动态生成而非硬编码
+
+### 2026-07-26 加班规则变更：平时加班起算时间从19:00改为18:30
+- **需求**: 从2026-07-27起，平时加班起算时间从19:00改为18:30，周末加班开始时间保持08:30不变
+- **根因**: 业务规则变更，需要新旧规则并存，历史数据保持原计算方式
+- **修复**: 
+  1. 后端 `calculate_overtime_duration()` 新增 `date` 参数，根据日期判断使用新旧规则
+  2. 前端 `calcOvertimeDuration()` 根据日期选择器的值动态选择基准时间
+  3. 时间选择器选项从19-23改为18-23，支持18:30开始
+  4. 验证逻辑根据日期动态判断结束时间范围
+- **规则**: 涉及历史数据兼容的规则变更必须使用日期条件分支，新旧规则并存
 
 ## 架构风险预警
 ### 并发安全

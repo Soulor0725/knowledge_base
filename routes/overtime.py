@@ -11,12 +11,23 @@ from auth_utils import login_required
 logger = logging.getLogger(__name__)
 
 
-def calculate_overtime_duration(overtime_type, start_time, end_time):
-    """根据加班类型和时间计算加班时长"""
+def calculate_overtime_duration(overtime_type, start_time, end_time, date=None):
+    """根据加班类型和时间计算加班时长
+    Args:
+        overtime_type: 'weekday' 或 'weekend'
+        start_time: 开始时间 HH:MM
+        end_time: 结束时间 HH:MM
+        date: 记录日期 YYYY-MM-DD，用于判断使用新旧规则
+    """
+    # 规则变更日期：2026-07-27 起平时加班从18:30开始计算
+    RULE_CHANGE_DATE = '2026-07-27'
     end = datetime.strptime(end_time, '%H:%M')
     if overtime_type == 'weekday':
-        # 平时加班统一从19:00开始计算，无论用户输入的开始时间
-        start = datetime.strptime('19:00', '%H:%M')
+        # 根据日期判断使用新旧规则
+        if date and date >= RULE_CHANGE_DATE:
+            start = datetime.strptime('18:30', '%H:%M')
+        else:
+            start = datetime.strptime('19:00', '%H:%M')
     else:
         start = datetime.strptime(start_time, '%H:%M')
     diff_minutes = (end - start).seconds // 60
@@ -101,10 +112,13 @@ def add_overtime_record():
     if start_time >= end_time:
         return jsonify({'error': '结束时间必须晚于开始时间'}), 400
 
-    # 平时加班：结束时间需在19:00-23:59范围内
+    # 平时加班：结束时间需在起算时间-23:59范围内
+    RULE_CHANGE_DATE = '2026-07-27'
     if overtime_type == 'weekday':
-        if end_time < '19:00' or end_time > '23:59':
-            return jsonify({'error': '平时加班结束时间需在 19:00-23:59 范围内'}), 400
+        # 根据日期判断起算时间
+        base_time = '18:30' if date >= RULE_CHANGE_DATE else '19:00'
+        if end_time < base_time or end_time > '23:59':
+            return jsonify({'error': f'平时加班结束时间需在 {base_time}-23:59 范围内'}), 400
 
     # 周末加班时间范围校验
     if overtime_type == 'weekend':
@@ -127,7 +141,7 @@ def add_overtime_record():
         except (ValueError, TypeError):
             return jsonify({'error': '时长格式错误'}), 400
     else:
-        duration = calculate_overtime_duration(overtime_type, start_time, end_time)
+        duration = calculate_overtime_duration(overtime_type, start_time, end_time, date)
 
     try:
         cursor.execute('INSERT INTO overtime_records (overtime_type, date, start_time, end_time, duration, remark, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -173,8 +187,11 @@ def update_overtime_record(record_id):
         return jsonify({'error': '结束时间必须晚于开始时间'}), 400
 
     if overtime_type == 'weekday':
-        if end_time < '19:00' or end_time > '23:59':
-            return jsonify({'error': '平时加班结束时间需在 19:00-23:59 范围内'}), 400
+        # 根据日期判断起算时间
+        RULE_CHANGE_DATE = '2026-07-27'
+        base_time = '18:30' if date >= RULE_CHANGE_DATE else '19:00'
+        if end_time < base_time or end_time > '23:59':
+            return jsonify({'error': f'平时加班结束时间需在 {base_time}-23:59 范围内'}), 400
 
     if overtime_type == 'weekend':
         if start_time < '08:30' or end_time > '23:59':
@@ -189,7 +206,7 @@ def update_overtime_record(record_id):
         except (ValueError, TypeError):
             return jsonify({'error': '时长格式错误'}), 400
     else:
-        duration = calculate_overtime_duration(overtime_type, start_time, end_time)
+        duration = calculate_overtime_duration(overtime_type, start_time, end_time, date)
 
     db = get_db()
     cursor = db.cursor()

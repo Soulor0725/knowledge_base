@@ -1805,7 +1805,7 @@
                 <div class="form-group">
                     <label>加班类型 *</label>
                     <select id="overtimeType" required onchange="onOvertimeTypeChange()">
-                        <option value="weekday">平时加班（19:00-23:59）</option>
+                        <option value="weekday">平时加班（18:30-23:59）</option>
                         <option value="weekend">周末加班（08:30-23:59）</option>
                     </select>
                 </div>
@@ -4622,8 +4622,44 @@ function openProfileModal() {
             return hiddenInput ? hiddenInput.value : '';
         }
 
+        function buildHourOptions(selectEl, startHour, endHour, placeholder) {
+            const currentVal = selectEl.value;
+            selectEl.innerHTML = `<option value="">${placeholder || '时'}</option>`;
+            for (let h = startHour; h <= endHour; h++) {
+                const v = String(h).padStart(2, '0');
+                selectEl.innerHTML += `<option value="${v}">${v}</option>`;
+            }
+            if (currentVal && [...selectEl.options].some(o => o.value === currentVal)) {
+                selectEl.value = currentVal;
+            } else {
+                selectEl.value = '';
+            }
+        }
+
         function onOvertimeTypeChange() {
             isManualDuration = false;
+            const type = _$('overtimeType').value;
+            const startTimePicker = document.getElementById('overtimeStartTime').parentElement.querySelector('.time-picker');
+            const endTimePicker = document.getElementById('overtimeEndTime').parentElement.querySelector('.time-picker');
+            if (type === 'weekday') {
+                buildHourOptions(startTimePicker.querySelector('.time-hour'), 18, 23);
+                buildHourOptions(endTimePicker.querySelector('.time-hour'), 18, 23);
+            } else {
+                buildHourOptions(startTimePicker.querySelector('.time-hour'), 8, 23);
+                buildHourOptions(endTimePicker.querySelector('.time-hour'), 8, 23);
+            }
+            const startVal = getTimePickerValue('overtimeStartTime');
+            const endVal = getTimePickerValue('overtimeEndTime');
+            if (startVal && startVal.includes(':')) {
+                const [h, m] = startVal.split(':');
+                startTimePicker.querySelector('.time-hour').value = h;
+                startTimePicker.querySelector('.time-minute').value = m;
+            }
+            if (endVal && endVal.includes(':')) {
+                const [h, m] = endVal.split(':');
+                endTimePicker.querySelector('.time-hour').value = h;
+                endTimePicker.querySelector('.time-minute').value = m;
+            }
             calcOvertimeDuration();
         }
 
@@ -4636,9 +4672,13 @@ function openProfileModal() {
             const end = getTimePickerValue('overtimeEndTime');
             const durationEl = _$('overtimeDuration');
             if (!end) { durationEl.value = ''; return; }
+            // 规则变更日期：2026-07-27 起平时加班从18:30开始计算
+            const RULE_CHANGE_DATE = '2026-07-27';
+            const recordDate = _$('overtimeDate').value;
             let diffMin;
             if (type === 'weekday') {
-                const base = new Date('2000-01-01T19:00');
+                const baseTime = (recordDate && recordDate >= RULE_CHANGE_DATE) ? '18:30' : '19:00';
+                const base = new Date('2000-01-01T' + baseTime);
                 const e = new Date('2000-01-01T' + end);
                 diffMin = (e - base) / 60000;
             } else {
