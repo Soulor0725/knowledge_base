@@ -205,18 +205,20 @@ def get_expenses_stats():
 
     where_clause = ' AND '.join(conditions)
 
-    cursor.execute(f"SELECT category, SUM(amount) as total FROM expenses WHERE {where_clause} GROUP BY category ORDER BY total DESC", params)
+    cursor.execute(f"SELECT category, SUM(amount) as total, COUNT(*) as cnt FROM expenses WHERE {where_clause} GROUP BY category ORDER BY total DESC", params)
     rows = cursor.fetchall()
-    cursor.execute(f"SELECT SUM(amount) FROM expenses WHERE {where_clause}", params)
-    grand_total = cursor.fetchone()[0] or 0
+    cursor.execute(f"SELECT SUM(amount), COUNT(*) FROM expenses WHERE {where_clause}", params)
+    summary = cursor.fetchone()
+    grand_total = summary[0] or 0
+    total_count = summary[1] or 0
 
     categories = []
     for row in rows:
         total = row['total'] or 0
         pct = round(total / grand_total * 100, 1) if grand_total > 0 else 0
-        categories.append({'category': row['category'], 'amount': round(total, 2), 'percentage': pct})
+        categories.append({'category': row['category'], 'amount': round(total, 2), 'percentage': pct, 'count': row['cnt']})
 
-    return jsonify({'categories': categories, 'grand_total': round(grand_total, 2)})
+    return jsonify({'categories': categories, 'grand_total': round(grand_total, 2), 'total_count': total_count})
 
 
 @expenses_bp.route('/expenses/today', methods=['GET'])
@@ -284,6 +286,165 @@ def get_expenses_stats_monthly():
         months.append({'month': row['month'], 'total': round(row['total'] or 0, 2)})
 
     return jsonify({'months': months})
+
+
+@expenses_bp.route('/expenses/stats/monthly-by-category', methods=['GET'])
+@login_required
+def get_expenses_stats_monthly_by_category():
+    """按月×分类返回支出明细，供堆叠图使用。"""
+    year = request.args.get('year', '', type=str)
+    start_month = request.args.get('start_month', '', type=str)
+    end_month = request.args.get('end_month', '', type=str)
+
+    db = get_db()
+    cursor = db.cursor()
+
+    conditions = ['user_id = ?']
+    params = [g.user_id]
+
+    if year:
+        yr_start, yr_end = year_to_range(year)
+        if yr_start and yr_end:
+            conditions.append('date >= ? AND date < ?')
+            params.extend([yr_start, yr_end])
+    if start_month:
+        conditions.append('substr(date, 6, 2) >= ?')
+        params.append(start_month)
+    if end_month:
+        conditions.append('substr(date, 6, 2) <= ?')
+        params.append(end_month)
+
+    where_clause = ' AND '.join(conditions)
+
+    cursor.execute(
+        f"SELECT CAST(substr(date, 6, 2) AS INTEGER) as month, category, SUM(amount) as total "
+        f"FROM expenses WHERE {where_clause} GROUP BY month, category ORDER BY month, total DESC",
+        params
+    )
+    rows = cursor.fetchall()
+
+    # 收集所有分类
+    categories_set = set()
+    month_map = {}  # month -> {category: total}
+    for row in rows:
+        m = row['month']
+        cat = row['category']
+        categories_set.add(cat)
+        if m not in month_map:
+            month_map[m] = {}
+        month_map[m][cat] = round(row['total'] or 0, 2)
+
+    months = sorted(month_map.keys())
+    categories = sorted(categories_set)
+
+    return jsonify({
+        'months': months,
+        'categories': categories,
+        'data': {str(m): month_map[m] for m in months},
+    })
+
+
+@expenses_bp.route('/expenses/stats/daily', methods=['GET'])
+@login_required
+def get_expenses_stats_daily():
+    """按日返回支出汇总，用于日均分析。"""
+    year = request.args.get('year', '', type=str)
+    start_month = request.args.get('start_month', '', type=str)
+    end_month = request.args.get('end_month', '', type=str)
+
+    db = get_db()
+    cursor = db.cursor()
+
+    conditions = ['user_id = ?']
+    params = [g.user_id]
+
+    if year:
+        yr_start, yr_end = year_to_range(year)
+        if yr_start and yr_end:
+            conditions.append('date >= ? AND date < ?')
+            params.extend([yr_start, yr_end])
+    if start_month:
+        conditions.append('substr(date, 6, 2) >= ?')
+        params.append(start_month)
+    if end_month:
+        conditions.append('substr(date, 6, 2) <= ?')
+        params.append(end_month)
+
+    where_clause = ' AND '.join(conditions)
+
+    cursor.execute(
+        f"SELECT date, SUM(amount) as total, COUNT(*) as cnt "
+        f"FROM expenses WHERE {where_clause} GROUP BY date ORDER BY date",
+        params
+    )
+    rows = cursor.fetchall()
+
+    daily = []
+    for row in rows:
+        daily.append({'date': row['date'], 'total': round(row['total'] or 0, 2), 'count': row['cnt']})
+
+    return jsonify({'daily': daily})
+
+
+@expenses_bp.route('/expenses/stats/category-trend', methods=['GET'])
+@login_required
+def get_expenses_stats_category_trend():
+    """按分类返回月度支出趋势，用于多线对比。"""
+    year = request.args.get('year', '', type=str)
+    start_month = request.args.get('start_month', '', type=str)
+    end_month = request.args.get('end_month', '', type=str)
+    # 指定关注的分类，逗号分隔；为空则返回全部
+    focus = request.args.get('focus', '', type=str)
+
+    db = get_db()
+    cursor = db.cursor()
+
+    conditions = ['user_id = ?']
+    params = [g.user_id]
+
+    if year:
+        yr_start, yr_end = year_to_range(year)
+        if yr_start and yr_end:
+            conditions.append('date >= ? AND date < ?')
+            params.extend([yr_start, yr_end])
+    if start_month:
+        conditions.append('substr(date, 6, 2) >= ?')
+        params.append(start_month)
+    if end_month:
+        conditions.append('substr(date, 6, 2) <= ?')
+        params.append(end_month)
+    if focus:
+        focus_cats = [c.strip() for c in focus.split(',') if c.strip()]
+        if focus_cats:
+            ph = ','.join(['?'] * len(focus_cats))
+            conditions.append(f'category IN ({ph})')
+            params.extend(focus_cats)
+
+    where_clause = ' AND '.join(conditions)
+
+    cursor.execute(
+        f"SELECT category, CAST(substr(date, 6, 2) AS INTEGER) as month, SUM(amount) as total "
+        f"FROM expenses WHERE {where_clause} GROUP BY category, month ORDER BY category, month",
+        params
+    )
+    rows = cursor.fetchall()
+
+    # 整理为 {category: {month: total}}
+    cat_map = {}
+    months_set = set()
+    for row in rows:
+        cat = row['category']
+        m = row['month']
+        months_set.add(m)
+        if cat not in cat_map:
+            cat_map[cat] = {}
+        cat_map[cat][m] = round(row['total'] or 0, 2)
+
+    return jsonify({
+        'months': sorted(months_set),
+        'categories': sorted(cat_map.keys()),
+        'data': cat_map,
+    })
 
 
 @expenses_bp.route('/expenses/export', methods=['GET', 'POST'])

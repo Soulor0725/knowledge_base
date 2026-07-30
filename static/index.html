@@ -1917,16 +1917,22 @@
                     <label>分类 *</label>
                     <select id="expenseCategory" required>
                         <option value="">请选择分类</option>
-                        <option value="燃气费">燃气费</option>
+                        <option value="餐饮">餐饮</option>
+                        <option value="饮品">饮品</option>
+                        <option value="水果">水果</option>
+                        <option value="菜肉米面油">菜肉米面油</option>
+                        <option value="香烟">香烟</option>
+                        <option value="交通">交通</option>
                         <option value="电费">电费</option>
+                        <option value="燃气费">燃气费</option>
+                        <option value="水费">水费</option>
                         <option value="话费">话费</option>
                         <option value="网费">网费</option>
                         <option value="暖气费">暖气费</option>
-                        <option value="香烟">香烟</option>
-                        <option value="菜肉米面油">菜肉米面油</option>
-                        <option value="交通">交通</option>
                         <option value="物业费">物业费</option>
-                        <option value="水果">水果</option>
+                        <option value="日用品">日用品</option>
+                        <option value="零食">零食</option>
+                        <option value="快递">快递</option>
                         <option value="其他">其他</option>
                     </select>
                 </div>
@@ -2036,6 +2042,7 @@
     <link rel="stylesheet" href="/static/vendor/css/github-dark.min.css">
     <script src="/static/vendor/js/highlight.min.js"></script>
     <script>
+        // v2.8 - 统计模块细化 + 消费分类扩展
         // If hljs is available, run a global highlight pass after load
         if (typeof hljs !== 'undefined' && typeof hljs.highlightAll === 'function') {
             try { hljs.highlightAll(); } catch (e) { console.error('hljs.highlightAll init error', e); }
@@ -3778,8 +3785,8 @@ function openProfileModal() {
         let expenseDateFilter = '';
         let expenseCategoryFilter = '';
         let selectedExpenseIds = new Set();
-        const EXPENSE_CATEGORIES = ['燃气费', '电费', '话费', '网费', '暖气费', '香烟', '菜肉米面油', '交通', '物业费', '水果', '其他'];
-        const EXPENSE_COLORS = {'燃气费':'#ef4444','电费':'#f97316','话费':'#3b82f6','网费':'#8b5cf6','暖气费':'#f59e0b','香烟':'#6b7280','菜肉米面油':'#22c55e','交通':'#06b6d4','物业费':'#d97706','水果':'#ec4899','其他':'#a78bfa'};
+        const EXPENSE_CATEGORIES = ['餐饮','饮品','水果','菜肉米面油','香烟','交通','电费','燃气费','水费','话费','网费','暖气费','物业费','日用品','零食','快递','其他'];
+        const EXPENSE_COLORS = {'餐饮':'#ef4444','饮品':'#f97316','水果':'#ec4899','菜肉米面油':'#22c55e','香烟':'#6b7280','交通':'#06b6d4','电费':'#f59e0b','燃气费':'#dc2626','水费':'#3b82f6','话费':'#8b5cf6','网费':'#a855f7','暖气费':'#d97706','物业费':'#ca8a04','日用品':'#14b8a6','零食':'#f43f5e','快递':'#84cc16','其他':'#94a3b8'};
 
         async function loadExpenses() {
             try {
@@ -4230,7 +4237,10 @@ function openProfileModal() {
                     </div>
                     <div id="expenseStatsCards" style="margin-bottom:24px;"></div>
                     <div id="expenseStatsTrend" style="margin-bottom:24px;"></div>
+                    <div id="expenseStatsStacked" style="margin-bottom:24px;"></div>
+                    <div id="expenseStatsCategoryTrend" style="margin-bottom:24px;"></div>
                     <div id="expenseStatsBar" style="margin-bottom:24px;"></div>
+                    <div id="expenseStatsPctTrend" style="margin-bottom:24px;"></div>
                     <div id="expenseStatsTable"></div>
                 </div>
             `;
@@ -4251,9 +4261,24 @@ function openProfileModal() {
                 data._year = year;
                 data._startMonth = startMonth;
                 data._endMonth = endMonth;
+
+                // 预拉取日均数据
+                let dailyData = [];
+                try {
+                    let durl = `${API_URL}/expenses/stats/daily?year=${year}`;
+                    if (startMonth) durl += `&start_month=${startMonth}`;
+                    if (endMonth) durl += `&end_month=${endMonth}`;
+                    const dr = await fetchWithTimeout(durl, { headers: getAuthHeaders() });
+                    if (dr.ok) dailyData = (await dr.json()).daily || [];
+                } catch (e) { console.error('日均数据加载失败:', e); }
+                data._daily = dailyData;
+
                 renderExpenseStatsCards(data);
                 renderExpenseStatsTrend(data);
+                renderExpenseStatsStacked(data);
+                renderExpenseStatsCategoryTrend(data);
                 renderExpenseStatsBar(data);
+                renderExpenseStatsPctTrend(data);
                 renderExpenseStatsTable(data);
             } catch (error) {
                 console.error('加载统计失败:', error);
@@ -4276,37 +4301,74 @@ function openProfileModal() {
             if (!el) return;
             const totalCategories = data.categories.length;
             const totalAmount = data.grand_total;
+            const totalCount = data.total_count || 0;
             const maxCategory = data.categories.length > 0 ? data.categories[0] : null;
             const year = data._year || new Date().getFullYear();
             const sm = data._startMonth;
             const em = data._endMonth;
             let rangeLabel = `${year}年`;
+            let monthSpan = 12;
             if (sm && em && sm === em) {
                 rangeLabel = `${year}年${parseInt(sm)}月`;
+                monthSpan = 1;
             } else if (sm && em) {
                 rangeLabel = `${year}年${parseInt(sm)}月 - ${parseInt(em)}月`;
+                monthSpan = parseInt(em) - parseInt(sm) + 1;
             } else if (sm) {
                 rangeLabel = `${year}年${parseInt(sm)}月起`;
+                monthSpan = 12 - parseInt(sm) + 1;
             } else if (em) {
                 rangeLabel = `${year}年1月 - ${parseInt(em)}月`;
+                monthSpan = parseInt(em);
             }
+            const avgMonthly = monthSpan > 0 ? totalAmount / monthSpan : totalAmount;
+
+            // 使用预拉取的日均数据
+            const daily = data._daily || [];
+            let avgDaily = 0, avgPerTx = 0, maxDay = null, minDay = null, activeDays = 0;
+            activeDays = daily.length;
+            if (daily.length > 0) {
+                const totalD = daily.reduce((s, d) => s + d.total, 0);
+                avgDaily = totalD / daily.length;
+                avgPerTx = totalCount > 0 ? totalD / totalCount : 0;
+                let maxIdx = 0, minIdx = 0;
+                daily.forEach((d, i) => {
+                    if (d.total > daily[maxIdx].total) maxIdx = i;
+                    if (d.total < daily[minIdx].total) minIdx = i;
+                });
+                maxDay = daily[maxIdx];
+                minDay = daily[minIdx];
+            }
+
             el.innerHTML = `
-                <div style="display:flex;gap:16px;flex-wrap:wrap;">
-                    <div style="flex:1;min-width:140px;background:rgba(20,184,166,0.1);border:1px solid rgba(20,184,166,0.2);border-radius:10px;padding:16px;text-align:center;">
-                        <div style="font-size:24px;font-weight:700;color:#14b8a6;">¥${totalAmount.toFixed(2)}</div>
-                        <div style="font-size:12px;color:#94a3b8;margin-top:4px;">${rangeLabel} 总支出</div>
+                <div style="display:flex;gap:12px;flex-wrap:wrap;">
+                    <div style="flex:1;min-width:130px;background:rgba(20,184,166,0.1);border:1px solid rgba(20,184,166,0.2);border-radius:10px;padding:14px;text-align:center;">
+                        <div style="font-size:22px;font-weight:700;color:#14b8a6;">¥${totalAmount.toFixed(2)}</div>
+                        <div style="font-size:11px;color:#94a3b8;margin-top:4px;">${rangeLabel} 总支出</div>
                     </div>
-                    <div style="flex:1;min-width:140px;background:rgba(96,165,250,0.1);border:1px solid rgba(96,165,250,0.2);border-radius:10px;padding:16px;text-align:center;">
-                        <div style="font-size:24px;font-weight:700;color:#60a5fa;">${totalCategories}</div>
-                        <div style="font-size:12px;color:#94a3b8;margin-top:4px;">消费分类数</div>
+                    <div style="flex:1;min-width:130px;background:rgba(96,165,250,0.1);border:1px solid rgba(96,165,250,0.2);border-radius:10px;padding:14px;text-align:center;">
+                        <div style="font-size:22px;font-weight:700;color:#60a5fa;">${totalCount}</div>
+                        <div style="font-size:11px;color:#94a3b8;margin-top:4px;">消费笔数 (${activeDays}天)</div>
                     </div>
-                    <div style="flex:1;min-width:140px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);border-radius:10px;padding:16px;text-align:center;">
-                        <div style="font-size:24px;font-weight:700;color:#ef4444;">${maxCategory ? maxCategory.category : '-'}</div>
-                        <div style="font-size:12px;color:#94a3b8;margin-top:4px;">最大支出分类</div>
+                    <div style="flex:1;min-width:130px;background:rgba(168,85,247,0.1);border:1px solid rgba(168,85,247,0.2);border-radius:10px;padding:14px;text-align:center;">
+                        <div style="font-size:22px;font-weight:700;color:#a855f7;">¥${avgMonthly.toFixed(2)}</div>
+                        <div style="font-size:11px;color:#94a3b8;margin-top:4px;">月均支出</div>
                     </div>
-                    <div style="flex:1;min-width:140px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.2);border-radius:10px;padding:16px;text-align:center;">
-                        <div style="font-size:24px;font-weight:700;color:#22c55e;">¥${maxCategory ? maxCategory.amount.toFixed(2) : '0.00'}</div>
-                        <div style="font-size:12px;color:#94a3b8;margin-top:4px;">最大支出金额</div>
+                    <div style="flex:1;min-width:130px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.2);border-radius:10px;padding:14px;text-align:center;">
+                        <div style="font-size:22px;font-weight:700;color:#22c55e;">¥${avgDaily.toFixed(2)}</div>
+                        <div style="font-size:11px;color:#94a3b8;margin-top:4px;">日均支出</div>
+                    </div>
+                    <div style="flex:1;min-width:130px;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.2);border-radius:10px;padding:14px;text-align:center;">
+                        <div style="font-size:22px;font-weight:700;color:#f59e0b;">¥${avgPerTx.toFixed(2)}</div>
+                        <div style="font-size:11px;color:#94a3b8;margin-top:4px;">单笔均价</div>
+                    </div>
+                    <div style="flex:1;min-width:130px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);border-radius:10px;padding:14px;text-align:center;">
+                        <div style="font-size:18px;font-weight:700;color:#ef4444;">${maxDay ? '¥'+maxDay.total.toFixed(0)+'<br><span style="font-size:10px;font-weight:400;color:#94a3b8;">'+maxDay.date+'</span>' : '暂无数据'}</div>
+                        <div style="font-size:11px;color:#94a3b8;margin-top:2px;">最高消费日</div>
+                    </div>
+                    <div style="flex:1;min-width:130px;background:rgba(14,165,233,0.1);border:1px solid rgba(14,165,233,0.2);border-radius:10px;padding:14px;text-align:center;">
+                        <div style="font-size:18px;font-weight:700;color:#0ea5e9;">${minDay ? '¥'+minDay.total.toFixed(0)+'<br><span style="font-size:10px;font-weight:400;color:#94a3b8;">'+minDay.date+'</span>' : '暂无数据'}</div>
+                        <div style="font-size:11px;color:#94a3b8;margin-top:2px;">最低消费日</div>
                     </div>
                 </div>
             `;
@@ -4338,7 +4400,7 @@ function openProfileModal() {
                     const y = padT + plotH - (plotH * i / gridCount);
                     const val = (maxVal * i / gridCount).toFixed(0);
                     gridLines += `<line x1="${padL}" y1="${y}" x2="${chartW - padR}" y2="${y}" stroke="rgba(148,163,184,0.1)" stroke-width="1"/>`;
-                    gridLines += `<text x="${padL - 8}" y="${y + 4}" text-anchor="end" fill="#64748b" font-size="10">¥${val}</text>`;
+                    gridLines += `<text x="${padL - 8}" y="${y + 4}" text-anchor="end" fill="#64748b" font-size="12">¥${val}</text>`;
                 }
                 months.forEach((m, i) => {
                     const x = padL + gap + i * (barW + gap);
@@ -4348,11 +4410,11 @@ function openProfileModal() {
                     bars += `<rect x="${x}" y="${y}" width="${barW}" height="${h}" rx="3" fill="${color}" opacity="0.85">
                         <title>${parseInt(m.month)}月: ¥${m.total.toFixed(2)}</title>
                     </rect>`;
-                    bars += `<text x="${x + barW / 2}" y="${y - 6}" text-anchor="middle" fill="#cbd5e1" font-size="10" font-weight="600">¥${m.total.toFixed(0)}</text>`;
-                    labels += `<text x="${x + barW / 2}" y="${chartH - 10}" text-anchor="middle" fill="#94a3b8" font-size="11">${parseInt(m.month)}月</text>`;
+                    bars += `<text x="${x + barW / 2}" y="${y - 6}" text-anchor="middle" fill="#cbd5e1" font-size="12" font-weight="600">¥${m.total.toFixed(0)}</text>`;
+                    labels += `<text x="${x + barW / 2}" y="${chartH - 10}" text-anchor="middle" fill="#94a3b8" font-size="12">${parseInt(m.month)}月</text>`;
                 });
                 let html = '<div style="background:rgba(30,41,59,0.8);border-radius:12px;border:1px solid rgba(148,163,184,0.1);padding:20px;">';
-                html += '<div style="font-size:14px;font-weight:600;color:#94a3b8;margin-bottom:16px;"><i class="fa fa-line-chart" style="color:#14b8a6;margin-right:6px;"></i>月度消费趋势</div>';
+                html += '<div style="font-size:16px;font-weight:600;color:#94a3b8;margin-bottom:16px;"><i class="fa fa-line-chart" style="color:#14b8a6;margin-right:6px;"></i>月度消费趋势</div>';
                 html += `<div style="overflow-x:auto;"><svg viewBox="0 0 ${chartW} ${chartH}" style="width:100%;max-width:${chartW}px;height:auto;">`;
                 html += gridLines + bars + labels;
                 html += '</svg></div></div>';
@@ -4360,6 +4422,180 @@ function openProfileModal() {
             } catch (e) {
                 console.error('加载月度趋势失败:', e);
                 el.innerHTML = '<div class="error-message">加载月度趋势失败</div>';
+            }
+        }
+
+        async function renderExpenseStatsStacked(data) {
+            const el = document.getElementById('expenseStatsStacked');
+            if (!el) return;
+            try {
+                let url = `${API_URL}/expenses/stats/monthly-by-category?year=${data._year || new Date().getFullYear()}`;
+                if (data._startMonth) url += `&start_month=${data._startMonth}`;
+                if (data._endMonth) url += `&end_month=${data._endMonth}`;
+                const resp = await fetchWithTimeout(url, { headers: getAuthHeaders() });
+                if (!resp.ok) throw new Error('加载分类月度数据失败');
+                const sData = await resp.json();
+                const months = sData.months || [];
+                const categories = sData.categories || [];
+                const mData = sData.data || {};
+                if (months.length === 0 || categories.length === 0) {
+                    el.innerHTML = '';
+                    return;
+                }
+                // 只取前8个分类，其余归入"其他"避免图例过多
+                const topCats = categories.slice(0, 8);
+                const chartW = 700, chartH = 240, padL = 60, padR = 20, padT = 30, padB = 50;
+                const plotW = chartW - padL - padR, plotH = chartH - padT - padB;
+                const barW = Math.min(44, plotW / months.length * 0.65);
+                const gap = (plotW - barW * months.length) / (months.length + 1);
+                // 每月总额用于Y轴
+                const monthTotals = months.map(m => {
+                    let s = 0;
+                    for (const cat of categories) { s += (mData[m] && mData[m][cat]) || 0; }
+                    return s;
+                });
+                const maxTotal = Math.max(...monthTotals, 1);
+                const gridCount = 4;
+                let gridLines = '';
+                for (let i = 0; i <= gridCount; i++) {
+                    const y = padT + plotH - (plotH * i / gridCount);
+                    const val = (maxTotal * i / gridCount).toFixed(0);
+                    gridLines += `<line x1="${padL}" y1="${y}" x2="${chartW - padR}" y2="${y}" stroke="rgba(148,163,184,0.1)" stroke-width="1"/>`;
+                    gridLines += `<text x="${padL - 8}" y="${y + 4}" text-anchor="end" fill="#64748b" font-size="12">¥${val}</text>`;
+                }
+                // 堆叠柱状图
+                let bars = '', labels = '';
+                months.forEach((m, i) => {
+                    const x = padL + gap + i * (barW + gap);
+                    let yBottom = padT + plotH;
+                    labels += `<text x="${x + barW / 2}" y="${chartH - 10}" text-anchor="middle" fill="#94a3b8" font-size="12">${m}月</text>`;
+                    for (const cat of topCats) {
+                        const val = (mData[m] && mData[m][cat]) || 0;
+                        if (val <= 0) continue;
+                        const segH = (val / maxTotal) * plotH;
+                        const yTop = yBottom - segH;
+                        const color = EXPENSE_COLORS[cat] || '#64748b';
+                        bars += `<rect x="${x}" y="${yTop}" width="${barW}" height="${segH}" fill="${color}" opacity="0.85">
+                            <title>${m}月 ${cat}: ¥${val.toFixed(2)}</title>
+                        </rect>`;
+                        yBottom = yTop;
+                    }
+                    // 顶部标注月总额
+                    const mt = monthTotals[i];
+                    if (mt > 0) {
+                        bars += `<text x="${x + barW / 2}" y="${padT + plotH - (mt / maxTotal) * plotH - 6}" text-anchor="middle" fill="#cbd5e1" font-size="12" font-weight="600">¥${mt.toFixed(0)}</text>`;
+                    }
+                });
+                // 图例
+                let legendHtml = '<div style="display:flex;flex-wrap:wrap;gap:10px 20px;margin-top:12px;justify-content:center;">';
+                topCats.forEach(cat => {
+                    const color = EXPENSE_COLORS[cat] || '#64748b';
+                    legendHtml += `<div style="display:flex;align-items:center;gap:5px;">
+                        <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${color};flex-shrink:0;"></span>
+                        <span style="font-size:12px;color:#cbd5e1;">${cat}</span>
+                    </div>`;
+                });
+                legendHtml += '</div>';
+                let html = '<div style="background:rgba(30,41,59,0.8);border-radius:12px;border:1px solid rgba(148,163,184,0.1);padding:20px;">';
+                html += '<div style="font-size:16px;font-weight:600;color:#94a3b8;margin-bottom:16px;"><i class="fa fa-bar-chart" style="color:#a855f7;margin-right:6px;"></i>月度分类支出</div>';
+                html += `<div style="overflow-x:auto;"><svg viewBox="0 0 ${chartW} ${chartH}" style="width:100%;max-width:${chartW}px;height:auto;">`;
+                html += gridLines + bars + labels;
+                html += '</svg></div>';
+                html += legendHtml + '</div>';
+                el.innerHTML = html;
+            } catch (e) {
+                console.error('加载月度分类趋势失败:', e);
+                el.innerHTML = '<div class="error-message">加载月度分类趋势失败</div>';
+            }
+        }
+
+        async function renderExpenseStatsCategoryTrend(data) {
+            const el = document.getElementById('expenseStatsCategoryTrend');
+            if (!el) return;
+            try {
+                // 取支出金额前6的分类做趋势线
+                const focusCats = data.categories.slice(0, 6).map(c => c.category).join(',');
+                let url = `${API_URL}/expenses/stats/category-trend?year=${data._year || new Date().getFullYear()}`;
+                if (data._startMonth) url += `&start_month=${data._startMonth}`;
+                if (data._endMonth) url += `&end_month=${data._endMonth}`;
+                if (focusCats) url += `&focus=${encodeURIComponent(focusCats)}`;
+                const resp = await fetchWithTimeout(url, { headers: getAuthHeaders() });
+                if (!resp.ok) throw new Error('加载分类趋势失败');
+                const tData = await resp.json();
+                const months = tData.months || [];
+                const categories = tData.categories || [];
+                const cData = tData.data || {};
+                if (months.length === 0 || categories.length === 0) {
+                    el.innerHTML = '';
+                    return;
+                }
+                const chartW = 860, chartH = 260, padL = 60, padR = 160, padT = 30, padB = 50;
+                const plotW = chartW - padL - padR, plotH = chartH - padT - padB;
+                // 全局最大值
+                let globalMax = 0;
+                for (const cat of categories) {
+                    for (const m of months) {
+                        const v = (cData[cat] && cData[cat][m]) || 0;
+                        if (v > globalMax) globalMax = v;
+                    }
+                }
+                globalMax = Math.max(globalMax, 1);
+                const gridCount = 4;
+                let gridLines = '';
+                for (let i = 0; i <= gridCount; i++) {
+                    const y = padT + plotH - (plotH * i / gridCount);
+                    const val = (globalMax * i / gridCount).toFixed(0);
+                    gridLines += `<line x1="${padL}" y1="${y}" x2="${chartW - padR}" y2="${y}" stroke="rgba(148,163,184,0.1)" stroke-width="1"/>`;
+                    gridLines += `<text x="${padL - 8}" y="${y + 4}" text-anchor="end" fill="#64748b" font-size="12">¥${val}</text>`;
+                }
+                // X轴月份标签
+                let xLabels = '';
+                months.forEach((m, i) => {
+                    const x = padL + (plotW / Math.max(months.length - 1, 1)) * i;
+                    xLabels += `<text x="${x}" y="${chartH - 10}" text-anchor="middle" fill="#94a3b8" font-size="12">${m}月</text>`;
+                });
+                // 每条分类折线
+                let lines = '', dots = '';
+                categories.forEach(cat => {
+                    const color = EXPENSE_COLORS[cat] || '#64748b';
+                    let points = '';
+                    months.forEach((m, i) => {
+                        const x = padL + (plotW / Math.max(months.length - 1, 1)) * i;
+                        const v = (cData[cat] && cData[cat][m]) || 0;
+                        const y = padT + plotH - (v / globalMax) * plotH;
+                        points += `${x},${y} `;
+                        dots += `<circle cx="${x}" cy="${y}" r="3" fill="${color}" stroke="rgba(15,23,42,0.8)" stroke-width="1.5">
+                            <title>${cat} ${m}月: ¥${v.toFixed(2)}</title>
+                        </circle>`;
+                    });
+                    lines += `<polyline points="${points.trim()}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" opacity="0.85"/>`;
+                    // 末端标签
+                    const lastM = months[months.length - 1];
+                    const lastV = (cData[cat] && cData[cat][lastM]) || 0;
+                    const lx = padL + plotW;
+                    const ly = padT + plotH - (lastV / globalMax) * plotH;
+                    dots += `<text x="${lx + 6}" y="${ly + 4}" fill="${color}" font-size="12" font-weight="600">${cat}</text>`;
+                });
+                // 图例
+                let legendHtml = '<div style="display:flex;flex-wrap:wrap;gap:10px 20px;margin-top:12px;justify-content:center;">';
+                categories.forEach(cat => {
+                    const color = EXPENSE_COLORS[cat] || '#64748b';
+                    legendHtml += `<div style="display:flex;align-items:center;gap:5px;">
+                        <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0;"></span>
+                        <span style="font-size:12px;color:#cbd5e1;">${cat}</span>
+                    </div>`;
+                });
+                legendHtml += '</div>';
+                let html = '<div style="background:rgba(30,41,59,0.8);border-radius:12px;border:1px solid rgba(148,163,184,0.1);padding:20px;">';
+                html += '<div style="font-size:16px;font-weight:600;color:#94a3b8;margin-bottom:16px;"><i class="fa fa-line-chart" style="color:#14b8a6;margin-right:6px;"></i>分类月度趋势 (Top 6)</div>';
+                html += `<div style="overflow-x:auto;"><svg viewBox="0 0 ${chartW} ${chartH}" style="width:100%;max-width:${chartW}px;height:auto;">`;
+                html += gridLines + xLabels + lines + dots;
+                html += '</svg></div>';
+                html += legendHtml + '</div>';
+                el.innerHTML = html;
+            } catch (e) {
+                console.error('加载分类趋势失败:', e);
+                el.innerHTML = '<div class="error-message">加载分类趋势失败</div>';
             }
         }
 
@@ -4400,21 +4636,116 @@ function openProfileModal() {
                     <span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:${color};flex-shrink:0;"></span>
                     <span style="font-size:12px;color:#cbd5e1;">${c.category}</span>
                     <span style="font-size:12px;color:${color};font-weight:600;">¥${c.amount.toFixed(2)}</span>
-                    <span style="font-size:11px;color:#94a3b8;">(${c.percentage}%)</span>
+                    <span style="font-size:12px;color:#94a3b8;">(${c.percentage}%)</span>
                 </div>`;
             });
             legendHtml += '</div>';
             let html = '<div style="background:rgba(30,41,59,0.8);border-radius:12px;border:1px solid rgba(148,163,184,0.1);padding:20px;">';
-            html += '<div style="font-size:14px;font-weight:600;color:#94a3b8;margin-bottom:16px;">分类支出占比</div>';
+            html += '<div style="font-size:16px;font-weight:600;color:#94a3b8;margin-bottom:16px;">分类支出占比</div>';
             html += `<div style="display:flex;flex-direction:column;align-items:center;">
                 <svg width="240" height="240" viewBox="0 0 240 240" style="filter:drop-shadow(0 4px 12px rgba(0,0,0,0.3));">${paths}
                     <text x="${cx}" y="${cy - 6}" text-anchor="middle" fill="#e2e8f0" font-size="16" font-weight="700">¥${data.grand_total.toFixed(2)}</text>
-                    <text x="${cx}" y="${cy + 14}" text-anchor="middle" fill="#94a3b8" font-size="11">总支出</text>
+                    <text x="${cx}" y="${cy + 14}" text-anchor="middle" fill="#94a3b8" font-size="12">总支出</text>
                 </svg>
                 ${legendHtml}
             </div>`;
             html += '</div>';
             el.innerHTML = html;
+        }
+
+        async function renderExpenseStatsPctTrend(data) {
+            const el = document.getElementById('expenseStatsPctTrend');
+            if (!el) return;
+            try {
+                let url = `${API_URL}/expenses/stats/monthly-by-category?year=${data._year || new Date().getFullYear()}`;
+                if (data._startMonth) url += `&start_month=${data._startMonth}`;
+                if (data._endMonth) url += `&end_month=${data._endMonth}`;
+                const resp = await fetchWithTimeout(url, { headers: getAuthHeaders() });
+                if (!resp.ok) throw new Error('加载占比趋势失败');
+                const pctData = await resp.json();
+                const months = pctData.months || [];
+                const categories = pctData.categories || [];
+                const mData = pctData.data || {};
+                if (months.length === 0 || categories.length === 0) {
+                    el.innerHTML = '';
+                    return;
+                }
+                // 只取前6个分类
+                const topCats = categories.slice(0, 6);
+                const chartW = 700, chartH = 240, padL = 60, padR = 20, padT = 30, padB = 50;
+                const plotW = chartW - padL - padR, plotH = chartH - padT - padB;
+                // 每月总额
+                const monthTotals = months.map(m => {
+                    let s = 0;
+                    for (const cat of topCats) { s += (mData[m] && mData[m][cat]) || 0; }
+                    return s;
+                });
+                // 每月各分类占比(0-100)
+                const pctByMonth = months.map((m, mi) => {
+                    const total = monthTotals[mi] || 1;
+                    const pcts = {};
+                    for (const cat of topCats) {
+                        pcts[cat] = ((mData[m] && mData[m][cat]) || 0) / total * 100;
+                    }
+                    return pcts;
+                });
+                // 网格线
+                const gridCount = 4;
+                let gridLines = '';
+                for (let i = 0; i <= gridCount; i++) {
+                    const y = padT + plotH - (plotH * i / gridCount);
+                    const pct = (100 * i / gridCount).toFixed(0);
+                    gridLines += `<line x1="${padL}" y1="${y}" x2="${chartW - padR}" y2="${y}" stroke="rgba(148,163,184,0.1)" stroke-width="1"/>`;
+                    gridLines += `<text x="${padL - 8}" y="${y + 4}" text-anchor="end" fill="#64748b" font-size="12">${pct}%</text>`;
+                }
+                // X轴
+                let xLabels = '';
+                months.forEach((m, i) => {
+                    const x = padL + (plotW / Math.max(months.length - 1, 1)) * i;
+                    xLabels += `<text x="${x}" y="${chartH - 10}" text-anchor="middle" fill="#94a3b8" font-size="12">${m}月</text>`;
+                });
+                // 堆叠面积图：从下到上累积
+                const stackOrder = topCats.slice().reverse();
+                let cumulative = new Array(months.length).fill(0);
+                let areas = '';
+                stackOrder.forEach(cat => {
+                    const color = EXPENSE_COLORS[cat] || '#64748b';
+                    let bottomPoints = '';
+                    let topPoints = '';
+                    months.forEach((m, i) => {
+                        const x = padL + (plotW / Math.max(months.length - 1, 1)) * i;
+                        const yBottom = padT + plotH - (cumulative[i] / 100) * plotH;
+                        const pctVal = pctByMonth[i][cat] || 0;
+                        const yTop = padT + plotH - ((cumulative[i] + pctVal) / 100) * plotH;
+                        bottomPoints += `${x},${yBottom} `;
+                        topPoints += `${x},${yTop} `;
+                        cumulative[i] += pctVal;
+                    });
+                    areas += `<polygon points="${topPoints.trim()} ${bottomPoints.trim().split(' ').reverse().join(' ')}" fill="${color}" opacity="0.7" stroke="${color}" stroke-width="1.5">
+                        ${months.map((m, i) => `<title>${cat} ${m}月: ${pctByMonth[i][cat].toFixed(1)}%</title>`).join('')}
+                    </polygon>`;
+                });
+                // 图例
+                let legendHtml = '<div style="display:flex;flex-wrap:wrap;gap:10px 20px;margin-top:12px;justify-content:center;">';
+                topCats.forEach(cat => {
+                    const color = EXPENSE_COLORS[cat] || '#64748b';
+                    legendHtml += `<div style="display:flex;align-items:center;gap:5px;">
+                        <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${color};flex-shrink:0;"></span>
+                        <span style="font-size:12px;color:#cbd5e1;">${cat}</span>
+                    </div>`;
+                });
+                legendHtml += '</div>';
+                let html = '<div style="background:rgba(30,41,59,0.8);border-radius:12px;border:1px solid rgba(148,163,184,0.1);padding:20px;">';
+                html += '<div style="font-size:16px;font-weight:600;color:#94a3b8;margin-bottom:16px;"><i class="fa fa-area-chart" style="color:#f43f5e;margin-right:6px;"></i>分类占比月度趋势</div>';
+                html += `<div style="overflow-x:auto;"><svg viewBox="0 0 ${chartW} ${chartH}" style="width:100%;max-width:${chartW}px;height:auto;">`;
+                html += gridLines + xLabels + areas;
+                html += '</svg></div>';
+                html += legendHtml + '</div>';
+                el.innerHTML = html;
+            } catch (e) {
+                console.error('加载占比趋势失败:', e);
+                el.innerHTML = '<div class="error-message">加载占比趋势失败</div>';
+            }
         }
 
         function renderExpenseStatsTable(data) {
@@ -4427,11 +4758,12 @@ function openProfileModal() {
             let html = '<div style="background:rgba(30,41,59,0.8);border-radius:12px;border:1px solid rgba(148,163,184,0.1);overflow:hidden;">';
             html += '<table style="width:100%;border-collapse:collapse;">';
             html += '<thead><tr style="background:rgba(15,23,42,0.5);">';
-            html += '<th style="padding:12px 16px;color:#94a3b8;font-size:13px;font-weight:700;text-align:center;border-bottom:1px solid rgba(148,163,184,0.1);width:10%;">序号</th>';
-            html += '<th style="padding:12px 16px;color:#94a3b8;font-size:13px;font-weight:700;text-align:left;border-bottom:1px solid rgba(148,163,184,0.1);width:25%;">分类</th>';
-            html += '<th style="padding:12px 16px;color:#94a3b8;font-size:13px;font-weight:700;text-align:right;border-bottom:1px solid rgba(148,163,184,0.1);width:25%;">金额</th>';
-            html += '<th style="padding:12px 16px;color:#94a3b8;font-size:13px;font-weight:700;text-align:center;border-bottom:1px solid rgba(148,163,184,0.1);width:20%;">占比</th>';
-            html += '<th style="padding:12px 16px;color:#94a3b8;font-size:13px;font-weight:700;text-align:left;border-bottom:1px solid rgba(148,163,184,0.1);width:20%;">可视化</th>';
+            html += '<th style="padding:12px 16px;color:#94a3b8;font-size:13px;font-weight:700;text-align:center;border-bottom:1px solid rgba(148,163,184,0.1);width:6%;">序号</th>';
+            html += '<th style="padding:12px 16px;color:#94a3b8;font-size:13px;font-weight:700;text-align:left;border-bottom:1px solid rgba(148,163,184,0.1);width:20%;">分类</th>';
+            html += '<th style="padding:12px 16px;color:#94a3b8;font-size:13px;font-weight:700;text-align:right;border-bottom:1px solid rgba(148,163,184,0.1);width:22%;">金额</th>';
+            html += '<th style="padding:12px 16px;color:#94a3b8;font-size:13px;font-weight:700;text-align:center;border-bottom:1px solid rgba(148,163,184,0.1);width:12%;">笔数</th>';
+            html += '<th style="padding:12px 16px;color:#94a3b8;font-size:13px;font-weight:700;text-align:center;border-bottom:1px solid rgba(148,163,184,0.1);width:15%;">占比</th>';
+            html += '<th style="padding:12px 16px;color:#94a3b8;font-size:13px;font-weight:700;text-align:left;border-bottom:1px solid rgba(148,163,184,0.1);width:25%;">可视化</th>';
             html += '</tr></thead><tbody>';
             data.categories.forEach((c, i) => {
                 const color = EXPENSE_COLORS[c.category] || '#64748b';
@@ -4440,6 +4772,7 @@ function openProfileModal() {
                 html += `<td style="padding:10px 16px;color:#94a3b8;font-size:13px;text-align:center;border-bottom:1px solid rgba(148,163,184,0.05);">${i + 1}</td>`;
                 html += `<td style="padding:10px 16px;font-size:13px;text-align:left;border-bottom:1px solid rgba(148,163,184,0.05);"><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:${color}22;color:${color};">${c.category}</span></td>`;
                 html += `<td style="padding:10px 16px;color:#22c55e;font-size:13px;text-align:right;border-bottom:1px solid rgba(148,163,184,0.05);font-weight:600;">¥${c.amount.toFixed(2)}</td>`;
+                html += `<td style="padding:10px 16px;color:#cbd5e1;font-size:13px;text-align:center;border-bottom:1px solid rgba(148,163,184,0.05);">${c.count || 0}</td>`;
                 html += `<td style="padding:10px 16px;color:#cbd5e1;font-size:13px;text-align:center;border-bottom:1px solid rgba(148,163,184,0.05);">${c.percentage}%</td>`;
                 html += `<td style="padding:10px 16px;border-bottom:1px solid rgba(148,163,184,0.05);"><div style="height:8px;background:rgba(148,163,184,0.1);border-radius:4px;overflow:hidden;"><div style="height:100%;width:${c.percentage}%;background:${color};border-radius:4px;"></div></div></td>`;
                 html += '</tr>';
@@ -4447,6 +4780,7 @@ function openProfileModal() {
             html += '<tr style="background:rgba(20,184,166,0.05);font-weight:700;">';
             html += '<td colspan="2" style="padding:12px 16px;color:#14b8a6;font-size:14px;text-align:center;border-bottom:1px solid rgba(148,163,184,0.1);">合计</td>';
             html += `<td style="padding:12px 16px;color:#14b8a6;font-size:14px;text-align:right;border-bottom:1px solid rgba(148,163,184,0.1);">¥${data.grand_total.toFixed(2)}</td>`;
+            html += `<td style="padding:12px 16px;color:#14b8a6;font-size:14px;text-align:center;border-bottom:1px solid rgba(148,163,184,0.1);">${data.total_count || 0}</td>`;
             html += `<td style="padding:12px 16px;color:#14b8a6;font-size:14px;text-align:center;border-bottom:1px solid rgba(148,163,184,0.1);">100%</td>`;
             html += '<td style="border-bottom:1px solid rgba(148,163,184,0.1);"></td></tr>';
             html += '</tbody></table></div>';
