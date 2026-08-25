@@ -161,8 +161,18 @@ CREATE INDEX idx_kiwi_sales_user_created ON kiwi_sales(user_id, created_at DESC)
 | 数量 | quantity |
 | 支付金额 | payment_amount |
 
+## 订单复制
+
+订单列表每行有「复制」按钮（绿色复制图标），点击后：
+- 自动填充原订单的客户名、电话、地址、规格（remark）、数量、金额
+- 接单日期重置为今天
+- 运单号清空、状态重置为「未发货」
+- 弹窗标题显示「复制新增订单」，提交后新增一条记录
+
+适用场景：同一客户重复下单时，无需重新填写全部信息。
+
 ## 相关文件
-- `routes/kiwi_sales.py` - 路由实现 (305行)
+- `routes/kiwi_sales.py` - 路由实现 (421行)
 
 ## 相关链接
 - [[architecture/overview]] - 系统架构总览
