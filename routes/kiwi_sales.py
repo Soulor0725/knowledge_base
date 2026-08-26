@@ -347,41 +347,57 @@ def get_kiwi_sales_report():
     })
 
 
-@kiwi_sales_bp.route('/kiwi-sales/export', methods=['GET'])
+@kiwi_sales_bp.route('/kiwi-sales/export', methods=['GET', 'POST'])
 @login_required
 def export_kiwi_sales():
     try:
         db = get_db()
         cursor = db.cursor()
         
-        # 搜索参数
-        customer = request.args.get('customer', '', type=str)
-        phone = request.args.get('phone', '', type=str)
-        year = request.args.get('year', '', type=str)
-        
-        # 构建查询
-        conditions = ['user_id = ?']
-        params = [g.user_id]
-        
-        if customer:
-            conditions.append('customer_name LIKE ?')
-            params.append(f'%{customer}%')
-        
-        if phone:
-            conditions.append('phone LIKE ?')
-            params.append(f'%{phone}%')
-        
-        if year:
-            yr_start, yr_end = year_to_range(year)
-            if yr_start and yr_end:
-                conditions.append("order_date >= ? AND order_date < ?")
-                params.extend([yr_start, yr_end])
-        
-        where_clause = 'WHERE ' + ' AND '.join(conditions)
-        
-        cursor.execute(f'''SELECT id, customer_name, phone, address, order_date, status, tracking_number, remark, quantity, payment_amount 
-                          FROM kiwi_sales {where_clause} ORDER BY created_at DESC LIMIT 10000''', params)
-        rows = fetchall_dicts(cursor)
+        if request.method == 'POST':
+            # 导出选中的订单
+            data, err = safe_get_json()
+            if err:
+                return err
+            data = data or {}
+            ids = data.get('ids', [])
+            if not ids:
+                return jsonify({'error': 'ids不能为空'}), 400
+            if not all(isinstance(i, int) for i in ids):
+                return jsonify({'error': 'ids必须为整数列表'}), 400
+            placeholders = ','.join(['?'] * len(ids))
+            params = list(ids) + [g.user_id]
+            cursor.execute(f'''SELECT id, customer_name, phone, address, order_date, status, tracking_number, remark, quantity, payment_amount 
+                              FROM kiwi_sales WHERE id IN ({placeholders}) AND user_id = ? ORDER BY created_at DESC''', params)
+            rows = fetchall_dicts(cursor)
+        else:
+            # 导出所有（带搜索条件）
+            customer = request.args.get('customer', '', type=str)
+            phone = request.args.get('phone', '', type=str)
+            year = request.args.get('year', '', type=str)
+            
+            conditions = ['user_id = ?']
+            params = [g.user_id]
+            
+            if customer:
+                conditions.append('customer_name LIKE ?')
+                params.append(f'%{customer}%')
+            
+            if phone:
+                conditions.append('phone LIKE ?')
+                params.append(f'%{phone}%')
+            
+            if year:
+                yr_start, yr_end = year_to_range(year)
+                if yr_start and yr_end:
+                    conditions.append("order_date >= ? AND order_date < ?")
+                    params.extend([yr_start, yr_end])
+            
+            where_clause = 'WHERE ' + ' AND '.join(conditions)
+            
+            cursor.execute(f'''SELECT id, customer_name, phone, address, order_date, status, tracking_number, remark, quantity, payment_amount 
+                              FROM kiwi_sales {where_clause} ORDER BY created_at DESC LIMIT 10000''', params)
+            rows = fetchall_dicts(cursor)
         
         if not rows:
             return jsonify({'error': '没有数据可导出'}), 404
@@ -412,7 +428,17 @@ def export_kiwi_sales():
             if final:
                 yield final.encode('gbk')
 
-        safe_filename = f"kiwi_sales_{datetime.now(timezone.utc).strftime('%Y%m%d')}.csv"
+        # 生成有意义的文件名
+        date_str = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')
+        if request.method == 'POST':
+            safe_filename = f"猕猴桃销售订单_选中_{date_str}.csv"
+        else:
+            suffix = ''
+            if customer:
+                suffix += f"_{customer}"
+            if year:
+                suffix += f"_{year}年"
+            safe_filename = f"猕猴桃销售订单{suffix}_{date_str}.csv"
         response = Response(stream_with_context(generate_csv()), mimetype='text/csv;charset=gbk')
         response.headers['Content-Disposition'] = f"attachment; filename=\"{safe_filename}\""
         return response

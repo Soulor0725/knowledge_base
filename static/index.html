@@ -2596,31 +2596,48 @@ function openProfileModal() {
 
         // 导出猕猴桃销售订单到Excel - 调用后端GBK编码API
         async function exportKiwiSalesToExcel() {
+            const exportBtn = document.querySelector('button[onclick="exportKiwiSalesToExcel()"]');
+            const originalText = exportBtn ? exportBtn.textContent : '';
             try {
-                // 显示加载状态
-                const originalText = document.querySelector('button[onclick="exportKiwiSalesToExcel()"]').textContent;
-                document.querySelector('button[onclick="exportKiwiSalesToExcel()"]').textContent = '导出中...';
+                let url = `${API_URL}/kiwi-sales/export`;
+                let method = 'GET';
+                let body = null;
+                let headers = { ...getAuthHeaders() };
                 
-                // 构建导出URL
-                let exportUrl = `${API_URL}/kiwi-sales/export`;
-                const queryParams = [];
-                if (kiwiSalesCustomerSearch) {
-                    queryParams.push(`customer=${encodeURIComponent(kiwiSalesCustomerSearch)}`);
-                }
-                if (kiwiSalesPhoneSearch) {
-                    queryParams.push(`phone=${encodeURIComponent(kiwiSalesPhoneSearch)}`);
-                }
-                if (kiwiSalesYearSearch) {
-                    queryParams.push(`year=${kiwiSalesYearSearch}`);
-                }
-                if (queryParams.length > 0) {
-                    exportUrl += '?' + queryParams.join('&');
-                }
+                // 获取选中的订单ID
+                const checkedBoxes = document.querySelectorAll('.kiwi-sales-checkbox:checked');
+                const selectedIds = Array.from(checkedBoxes).map(cb => parseInt(cb.value));
                 
-                const response = await fetchWithTimeout(exportUrl, {
-                    headers: getAuthHeaders()
-                });
-                
+                if (selectedIds.length > 0) {
+                    // 如果有选中的订单，使用POST方法导出指定订单
+                    method = 'POST';
+                    headers['Content-Type'] = 'application/json';
+                    body = JSON.stringify({ ids: selectedIds });
+                    if (!confirm(`确定要导出选中的 ${selectedIds.length} 条订单吗？`)) return;
+                } else {
+                    // 如果没有选中，导出当前筛选条件下的所有订单
+                    const queryParams = [];
+                    if (kiwiSalesCustomerSearch) {
+                        queryParams.push(`customer=${encodeURIComponent(kiwiSalesCustomerSearch)}`);
+                    }
+                    if (kiwiSalesPhoneSearch) {
+                        queryParams.push(`phone=${encodeURIComponent(kiwiSalesPhoneSearch)}`);
+                    }
+                    if (kiwiSalesYearSearch) {
+                        queryParams.push(`year=${kiwiSalesYearSearch}`);
+                    }
+                    if (queryParams.length > 0) {
+                        url += '?' + queryParams.join('&');
+                    }
+                    if (!confirm('确定要导出当前筛选条件下的所有订单吗？')) return;
+                }
+
+                if (exportBtn) {
+                    exportBtn.textContent = '导出中...';
+                    exportBtn.disabled = true;
+                }
+
+                const response = await fetchWithTimeout(url, { method, headers, body });
                 if (!response.ok) {
                     if (response.status === 401) {
                         checkAuth();
@@ -2630,20 +2647,31 @@ function openProfileModal() {
                 
                 // 处理文件下载
                 const blob = await response.blob();
-                const url = URL.createObjectURL(blob);
-                const link = document.createElement('a');
-                link.setAttribute('href', url);
-                const now = new Date();
-                const filename = `猕猴桃销售订单_${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}.csv`;
-                link.setAttribute('download', filename);
-                link.style.visibility = 'hidden';
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
+                const contentDisposition = response.headers.get('Content-Disposition');
+                let filename = '猕猴桃销售订单.csv';
+                if (contentDisposition) {
+                    const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+                    if (filenameMatch && filenameMatch[1]) {
+                        filename = filenameMatch[1].replace(/['"]/g, '');
+                    }
+                }
                 
-                // 恢复按钮文本
-                document.querySelector('button[onclick="exportKiwiSalesToExcel()"]').textContent = originalText;
+                // 创建下载链接
+                const downloadUrl = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = downloadUrl;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(downloadUrl);
                 
+                // 恢复按钮
+                if (exportBtn) {
+                    exportBtn.textContent = originalText;
+                    exportBtn.disabled = false;
+                }
+
                 // 清除选中状态
                 const selectAll = document.getElementById('selectAllKiwiSales');
                 if (selectAll) selectAll.checked = false;
@@ -2654,8 +2682,11 @@ function openProfileModal() {
                 alert('导出成功！');
             } catch (error) {
                 console.error('导出失败:', error);
-                document.querySelector('button[onclick="exportKiwiSalesToExcel()"]').textContent = '导出Excel';
-                alert('导出失败，请重试');
+                if (exportBtn) {
+                    exportBtn.textContent = originalText;
+                    exportBtn.disabled = false;
+                }
+                alert(error.message);
             }
         }
 

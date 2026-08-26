@@ -212,6 +212,8 @@
 - `PUT /api/kiwi-sales/:id` - 更新销售记录
 - `DELETE /api/kiwi-sales/:id` - 删除销售记录
 - `GET /api/kiwi-sales-report` - 获取销售报表（按客户汇总）
+- `GET /api/kiwi-sales/export` - 导出销售订单CSV（支持筛选条件）
+- `POST /api/kiwi-sales/export` - 导出选中的销售订单CSV
 
 **业务规则：**
 - 客户名：必填，最长50字符
