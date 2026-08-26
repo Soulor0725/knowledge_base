@@ -106,6 +106,7 @@ def get_kiwi_sales():
     customer = request.args.get('customer', '', type=str)
     phone = request.args.get('phone', '', type=str)
     year = request.args.get('year', '', type=str)
+    status = request.args.get('status', '', type=str)
     
     # 构建查询
     conditions = ['user_id = ?']
@@ -124,6 +125,10 @@ def get_kiwi_sales():
         if yr_start and yr_end:
             conditions.append("order_date >= ? AND order_date < ?")
             params.extend([yr_start, yr_end])
+    
+    if status:
+        conditions.append('status = ?')
+        params.append(status)
     
     where_clause = 'WHERE ' + ' AND '.join(conditions)
     
@@ -375,6 +380,7 @@ def export_kiwi_sales():
             customer = request.args.get('customer', '', type=str)
             phone = request.args.get('phone', '', type=str)
             year = request.args.get('year', '', type=str)
+            status = request.args.get('status', '', type=str)
             
             conditions = ['user_id = ?']
             params = [g.user_id]
@@ -392,6 +398,10 @@ def export_kiwi_sales():
                 if yr_start and yr_end:
                     conditions.append("order_date >= ? AND order_date < ?")
                     params.extend([yr_start, yr_end])
+            
+            if status:
+                conditions.append('status = ?')
+                params.append(status)
             
             where_clause = 'WHERE ' + ' AND '.join(conditions)
             

@@ -2626,6 +2626,9 @@ function openProfileModal() {
                     if (kiwiSalesYearSearch) {
                         queryParams.push(`year=${kiwiSalesYearSearch}`);
                     }
+                    if (kiwiSalesStatusSearch) {
+                        queryParams.push(`status=${encodeURIComponent(kiwiSalesStatusSearch)}`);
+                    }
                     if (queryParams.length > 0) {
                         url += '?' + queryParams.join('&');
                     }
@@ -3112,6 +3115,7 @@ function openProfileModal() {
         let kiwiSalesCustomerSearch = '';
         let kiwiSalesPhoneSearch = '';
         let kiwiSalesYearSearch = '';
+        let kiwiSalesStatusSearch = '';
         
         async function loadKiwiSales() {
             try {
@@ -3124,6 +3128,9 @@ function openProfileModal() {
                 }
                 if (kiwiSalesYearSearch) {
                     url += `&year=${kiwiSalesYearSearch}`;
+                }
+                if (kiwiSalesStatusSearch) {
+                    url += `&status=${encodeURIComponent(kiwiSalesStatusSearch)}`;
                 }
                 const response = await fetchWithTimeout(url, {
                     headers: getAuthHeaders()
@@ -3147,6 +3154,8 @@ function openProfileModal() {
             kiwiSalesPhoneSearch = document.getElementById('kiwiPhoneSearch').value.trim();
             const yearSelect = document.getElementById('kiwiSalesYearFilter');
             kiwiSalesYearSearch = yearSelect ? yearSelect.value : '';
+            const statusSelect = document.getElementById('kiwiSalesStatusFilter');
+            kiwiSalesStatusSearch = statusSelect ? statusSelect.value : '';
             kiwiSalesCurrentPage = 1;
             loadKiwiSales();
         }
@@ -3157,10 +3166,13 @@ function openProfileModal() {
             document.getElementById('kiwiPhoneSearch').value = '';
             const yearSelect = document.getElementById('kiwiSalesYearFilter');
             if (yearSelect) yearSelect.value = '';
+            const statusSelect = document.getElementById('kiwiSalesStatusFilter');
+            if (statusSelect) statusSelect.value = '';
             // 重置搜索条件
             kiwiSalesCustomerSearch = '';
             kiwiSalesPhoneSearch = '';
             kiwiSalesYearSearch = '';
+            kiwiSalesStatusSearch = '';
             // 重新加载所有订单
             kiwiSalesCurrentPage = 1;
             loadKiwiSales();
@@ -3172,6 +3184,7 @@ function openProfileModal() {
             kiwiSalesCustomerSearch = '';
             kiwiSalesPhoneSearch = '';
             kiwiSalesYearSearch = '';
+            kiwiSalesStatusSearch = '';
             // 隐藏文章工具栏
             const toolbar = document.querySelector('.toolbar');
             if (toolbar) {
@@ -3249,6 +3262,14 @@ function openProfileModal() {
                                 color: #cbd5e1;
                                 font-size: 12px;
                             ">
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <label style="font-size: 12px; color: #94a3b8;">状态：</label>
+                            <select id="kiwiSalesStatusFilter" onchange="handleKiwiSearch()" style="padding: 8px 12px; border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 6px; background: rgba(30, 41, 59, 0.8); color: #cbd5e1; font-size: 12px;">
+                                <option value="">全部状态</option>
+                                <option value="未发货">未发货</option>
+                                <option value="已发货">已发货</option>
+                            </select>
                         </div>
                         <button class="btn btn-secondary" onclick="handleKiwiSearch()" style="padding: 8px 16px; font-size: 12px; font-weight: 500; margin-left: 10px;">
                             <i class="fa fa-search"></i> 搜索
