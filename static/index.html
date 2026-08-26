@@ -2640,7 +2640,7 @@ function openProfileModal() {
                     exportBtn.disabled = true;
                 }
 
-                const response = await fetchWithTimeout(url, { method, headers, body });
+                const response = await fetchWithTimeout(url, { method, headers, body }, 30000);
                 if (!response.ok) {
                     if (response.status === 401) {
                         checkAuth();
