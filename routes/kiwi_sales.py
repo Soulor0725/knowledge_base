@@ -359,8 +359,11 @@ def export_kiwi_sales():
         db = get_db()
         cursor = db.cursor()
         
+        # 初始化变量（POST 和 GET 共用文件名生成）
+        customer = ''
+        year = ''
+        
         if request.method == 'POST':
-            # 导出选中的订单
             data, err = safe_get_json()
             if err:
                 return err
@@ -374,83 +377,66 @@ def export_kiwi_sales():
             params = list(ids) + [g.user_id]
             cursor.execute(f'''SELECT id, customer_name, phone, address, order_date, status, tracking_number, remark, quantity, payment_amount 
                               FROM kiwi_sales WHERE id IN ({placeholders}) AND user_id = ? ORDER BY created_at DESC''', params)
-            rows = fetchall_dicts(cursor)
         else:
-            # 导出所有（带搜索条件）
             customer = request.args.get('customer', '', type=str)
             phone = request.args.get('phone', '', type=str)
             year = request.args.get('year', '', type=str)
             status = request.args.get('status', '', type=str)
-            
             conditions = ['user_id = ?']
             params = [g.user_id]
-            
             if customer:
                 conditions.append('customer_name LIKE ?')
                 params.append(f'%{customer}%')
-            
             if phone:
                 conditions.append('phone LIKE ?')
                 params.append(f'%{phone}%')
-            
             if year:
                 yr_start, yr_end = year_to_range(year)
                 if yr_start and yr_end:
                     conditions.append("order_date >= ? AND order_date < ?")
                     params.extend([yr_start, yr_end])
-            
             if status:
                 conditions.append('status = ?')
                 params.append(status)
-            
             where_clause = 'WHERE ' + ' AND '.join(conditions)
-            
             cursor.execute(f'''SELECT id, customer_name, phone, address, order_date, status, tracking_number, remark, quantity, payment_amount 
                               FROM kiwi_sales {where_clause} ORDER BY created_at DESC LIMIT 10000''', params)
-            rows = fetchall_dicts(cursor)
         
+        rows = fetchall_dicts(cursor)
         if not rows:
             return jsonify({'error': '没有数据可导出'}), 404
 
-        def generate_csv():
-            output = io.StringIO()
-            writer = csv.writer(output, lineterminator='\n')
-            writer.writerow(['序号', '客户名', '电话', '地址', '接单日期', '状态', '运单号', '备注', '数量', '支付金额'])
-            for idx, r in enumerate(rows):
-                line = output.getvalue()
-                yield line.encode('gbk')
-                output.seek(0)
-                output.truncate(0)
-                writer.writerow([
-                    idx + 1,
-                    sanitize_csv_field(r['customer_name']),
-                    sanitize_csv_field(r['phone']),
-                    sanitize_csv_field(r['address']),
-                    sanitize_csv_field(r['order_date'] or ''),
-                    sanitize_csv_field(r['status'] or '未发货'),
-                    sanitize_csv_field(r['tracking_number'] or ''),
-                    sanitize_csv_field(r['remark'] or ''),
-                    r['quantity'] or 0,
-                    (r['payment_amount'] or 0)
-                ])
+        output = io.StringIO()
+        writer = csv.writer(output, lineterminator='\n')
+        writer.writerow(['序号', '客户名', '电话', '地址', '接单日期', '状态', '运单号', '备注', '数量', '支付金额'])
+        for idx, r in enumerate(rows):
+            writer.writerow([
+                idx + 1,
+                sanitize_csv_field(r['customer_name']),
+                sanitize_csv_field(r['phone']),
+                sanitize_csv_field(r['address']),
+                sanitize_csv_field(r['order_date'] or ''),
+                sanitize_csv_field(r['status'] or '未发货'),
+                sanitize_csv_field(r['tracking_number'] or ''),
+                sanitize_csv_field(r['remark'] or ''),
+                r['quantity'] or 0,
+                (r['payment_amount'] or 0)
+            ])
 
-            final = output.getvalue()
-            if final:
-                yield final.encode('gbk')
-
-        # 生成有意义的文件名
         date_str = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')
         if request.method == 'POST':
-            safe_filename = f"猕猴桃销售订单_选中_{date_str}.csv"
+            safe_filename = f"kiwi_sales_selected_{date_str}.csv"
         else:
             suffix = ''
             if customer:
                 suffix += f"_{customer}"
             if year:
-                suffix += f"_{year}年"
-            safe_filename = f"猕猴桃销售订单{suffix}_{date_str}.csv"
-        response = Response(stream_with_context(generate_csv()), mimetype='text/csv;charset=gbk')
-        response.headers['Content-Disposition'] = f"attachment; filename=\"{safe_filename}\""
+                suffix += f"_{year}year"
+            safe_filename = f"kiwi_sales{suffix}_{date_str}.csv"
+        
+        csv_bytes = output.getvalue().encode('gbk')
+        response = Response(csv_bytes, mimetype='text/csv;charset=gbk')
+        response.headers['Content-Disposition'] = f"attachment; filename=\"safe_filename\"; filename*=UTF-8''{safe_filename}"
         return response
     except Exception as e:
         logger.warning('export_kiwi_sales failed: %s', e)
