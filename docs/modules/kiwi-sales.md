@@ -157,7 +157,7 @@ CREATE INDEX idx_kiwi_sales_user_created ON kiwi_sales(user_id, created_at DESC)
 | 接单日期 | order_date |
 | 状态 | status |
 | 运单号 | tracking_number |
-| 备注 | remark |
+| 规格 | remark |
 | 数量 | quantity |
 | 支付金额 | payment_amount |
 
