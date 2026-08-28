@@ -408,7 +408,7 @@ def export_kiwi_sales():
 
         output = io.StringIO()
         writer = csv.writer(output, lineterminator='\n')
-        writer.writerow(['序号', '客户名', '电话', '地址', '接单日期', '状态', '运单号', '备注', '数量', '支付金额'])
+        writer.writerow(['序号', '客户名', '电话', '地址', '接单日期', '状态', '运单号', '规格', '数量', '支付金额'])
         for idx, r in enumerate(rows):
             writer.writerow([
                 idx + 1,

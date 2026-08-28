@@ -1770,7 +1770,7 @@
                     <input type="text" id="kiwiTrackingNumber" placeholder="请输入运单号">
                 </div>
                 <div class="form-group">
-                    <label>备注</label>
+                    <label>规格</label>
                     <select id="kiwiRemark">
                         <option value="">请选择</option>
                         <option value="5斤装">5斤装</option>
@@ -3294,7 +3294,7 @@ function openProfileModal() {
                         <div class="main-header-order-date" style="flex: 1; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">接单日期</div>
                         <div class="main-header-status" style="flex: 1; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">状态</div>
                         <div class="main-header-tracking" style="flex: 1.5; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: left; padding: 0 5px; white-space: nowrap;">运单号</div>
-                        <div class="main-header-remark" style="flex: 0.8; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">备注</div>
+                        <div class="main-header-remark" style="flex: 0.8; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">规格</div>
                         <div class="main-header-quantity" style="flex: 0.6; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">数量</div>
                         <div class="main-header-payment" style="flex: 0.8; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">支付金额</div>
                         <div class="main-header-actions" style="flex: 0.8; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">操作</div>
@@ -3356,7 +3356,7 @@ function openProfileModal() {
                     <div class="main-article-remark" style="flex: 0.8; color: #94a3b8; font-size: 12px; text-align: center;">${escapeHtml(sale.remark || '-')}</div>
                     <div class="main-article-quantity" style="flex: 0.6; color: #94a3b8; font-size: 12px; text-align: center;">${sale.quantity || 0}</div>
                     <div class="main-article-payment" style="flex: 0.8; color: #3b82f6; font-size: 12px; font-weight: 600; text-align: center;">${(sale.payment_amount || 0).toFixed(2)}</div>
-                    <div class="main-article-actions" style="flex: 1; display: flex; gap: 6px; justify-content: center;">
+                    <div class="main-article-actions" style="flex: 0.8; display: flex; gap: 6px; justify-content: center;">
                         <button class="action-icon-btn" onclick="copyKiwiSale(${sale.id})" title="复制新增" style="color: #22c55e; border: 1px solid rgba(34,197,94,0.3); background: rgba(34,197,94,0.1);"><i class="fa fa-copy"></i></button>
                         <button class="action-icon-btn edit" onclick="editKiwiSale(${sale.id})" title="编辑订单"><i class="fa fa-pencil"></i></button>
                         <button class="action-icon-btn delete" onclick="deleteKiwiSale(${sale.id})" title="删除订单"><i class="fa fa-trash"></i></button>
