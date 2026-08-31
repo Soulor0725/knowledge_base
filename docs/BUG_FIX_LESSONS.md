@@ -404,6 +404,28 @@
     - 搜索关键词：`字体过小`、`看不清`、`可读性差` → 检查所有 `font-size ≤ 11` 的节点
     - **新增检查清单项**：新增 SVG 图表时，内部字体 ≥ 12，区块标题 ≥ 16
 
+---
+
+## 三、报表排序类
+
+### 🟡 Bug #18：销售报表未按时间排序，客户顺序随机
+
+- **版本**：v2.6.7
+- **现象**：销售报表列表中客户出现顺序与接单日期无关，用户体验差，无法快速找到最新下单客户
+- **根因**：SQL 查询使用 `ORDER BY customer_name, remark`（按名称字母排序），未引入 `order_date` 时间维度
+- **修复**：
+  ```sql
+  SELECT customer_name, remark, SUM(quantity), SUM(payment_amount), MAX(order_date) as latest_order_date
+  FROM kiwi_sales WHERE ... GROUP BY customer_name, remark
+  ORDER BY latest_order_date DESC, customer_name, remark
+  ```
+  同时修改 Python 分组逻辑，用 `customers_order` 列表保持 SQL 排序顺序（字典插入序）
+- **教训**：
+  - 报表列表排序应优先考虑**时间维度**，而非字母顺序
+  - `GROUP BY` 后的 `ORDER BY` 可用聚合函数（如 `MAX()`）排序
+  - Python 3.7+ 字典保持插入序，但显式维护 `customers_order` 列表更可靠
+  - 搜索关键词：`报表顺序不对`、`排序混乱` → 检查 SQL `ORDER BY` 是否含时间字段
+
 ## 相关链接
 - [[architecture/overview]] - 系统架构总览
 - [[modules/auth]] - 认证模块

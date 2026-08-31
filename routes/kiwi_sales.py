@@ -272,20 +272,21 @@ def get_kiwi_sales_report():
             year_filter = 'AND order_date >= ? AND order_date < ?'
             year_params = [yr_start, yr_end]
     
-    # 先获取所有客户数据进行分组计算
+    # 先获取所有客户数据进行分组计算，按最新接单日期倒序排列
     cursor.execute(f'''
-        SELECT customer_name, remark, SUM(quantity) as total_quantity, SUM(payment_amount) as total_amount
+        SELECT customer_name, remark, SUM(quantity) as total_quantity, SUM(payment_amount) as total_amount, MAX(order_date) as latest_order_date
         FROM kiwi_sales
         WHERE user_id = ? AND customer_name IS NOT NULL AND customer_name != '' {year_filter}
         GROUP BY customer_name, remark
-        ORDER BY customer_name, remark
+        ORDER BY latest_order_date DESC, customer_name, remark
         LIMIT 5000
     ''', (g.user_id,) + tuple(year_params))
     
     all_results = [dict(row) for row in cursor.fetchall()]
     
-    # 按客户名分组
+    # 按客户名分组，保持SQL查询的排序顺序（按最新接单日期倒序）
     grouped_data = {}
+    customers_order = []  # 保持客户出现的顺序
     for row in all_results:
         customer = row['customer_name']
         if customer not in grouped_data:
@@ -293,14 +294,16 @@ def get_kiwi_sales_report():
                 'customer_name': customer,
                 'items': [],
                 'total_quantity': 0,
-                'total_amount': 0
+                'total_amount': 0,
+                'latest_order_date': row.get('latest_order_date', '')
             }
+            customers_order.append(customer)
         grouped_data[customer]['items'].append(row)
         grouped_data[customer]['total_quantity'] += (row['total_quantity'] or 0)
         grouped_data[customer]['total_amount'] += (row['total_amount'] or 0)
     
-    # 转换为列表并计算分页
-    customers_list = list(grouped_data.values())
+    # 按客户出现的顺序转换为列表（SQL查询已按最新接单日期倒序排列）
+    customers_list = [grouped_data[customer] for customer in customers_order]
     total_customers = len(customers_list)
     total_pages = (total_customers + page_size - 1) // page_size
     
