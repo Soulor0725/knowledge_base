@@ -107,6 +107,7 @@ def get_kiwi_sales():
     phone = request.args.get('phone', '', type=str)
     year = request.args.get('year', '', type=str)
     status = request.args.get('status', '', type=str)
+    tracking = request.args.get('tracking', '', type=str)
     
     # 构建查询
     conditions = ['user_id = ?']
@@ -129,6 +130,10 @@ def get_kiwi_sales():
     if status:
         conditions.append('status = ?')
         params.append(status)
+    
+    if tracking:
+        conditions.append('tracking_number LIKE ?')
+        params.append(f'%{tracking}%')
     
     where_clause = 'WHERE ' + ' AND '.join(conditions)
     

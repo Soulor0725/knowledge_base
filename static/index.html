@@ -3122,6 +3122,7 @@ function openProfileModal() {
         let kiwiSalesPhoneSearch = '';
         let kiwiSalesYearSearch = '';
         let kiwiSalesStatusSearch = '';
+        let kiwiSalesTrackingSearch = '';
         
         async function loadKiwiSales() {
             try {
@@ -3137,6 +3138,9 @@ function openProfileModal() {
                 }
                 if (kiwiSalesStatusSearch) {
                     url += `&status=${encodeURIComponent(kiwiSalesStatusSearch)}`;
+                }
+                if (kiwiSalesTrackingSearch) {
+                    url += `&tracking=${encodeURIComponent(kiwiSalesTrackingSearch)}`;
                 }
                 const response = await fetchWithTimeout(url, {
                     headers: getAuthHeaders()
@@ -3158,6 +3162,8 @@ function openProfileModal() {
         function handleKiwiSearch() {
             kiwiSalesCustomerSearch = document.getElementById('kiwiCustomerSearch').value.trim();
             kiwiSalesPhoneSearch = document.getElementById('kiwiPhoneSearch').value.trim();
+            const trackingInput = document.getElementById('kiwiTrackingSearch');
+            kiwiSalesTrackingSearch = trackingInput ? trackingInput.value.trim() : '';
             const yearSelect = document.getElementById('kiwiSalesYearFilter');
             kiwiSalesYearSearch = yearSelect ? yearSelect.value : '';
             const statusSelect = document.getElementById('kiwiSalesStatusFilter');
@@ -3170,6 +3176,8 @@ function openProfileModal() {
             // 清空搜索输入框
             document.getElementById('kiwiCustomerSearch').value = '';
             document.getElementById('kiwiPhoneSearch').value = '';
+            const trackingInput = document.getElementById('kiwiTrackingSearch');
+            if (trackingInput) trackingInput.value = '';
             const yearSelect = document.getElementById('kiwiSalesYearFilter');
             if (yearSelect) yearSelect.value = '';
             const statusSelect = document.getElementById('kiwiSalesStatusFilter');
@@ -3177,6 +3185,7 @@ function openProfileModal() {
             // 重置搜索条件
             kiwiSalesCustomerSearch = '';
             kiwiSalesPhoneSearch = '';
+            kiwiSalesTrackingSearch = '';
             kiwiSalesYearSearch = '';
             kiwiSalesStatusSearch = '';
             // 重新加载所有订单
@@ -3189,6 +3198,7 @@ function openProfileModal() {
             kiwiSalesCurrentPage = 1;
             kiwiSalesCustomerSearch = '';
             kiwiSalesPhoneSearch = '';
+            kiwiSalesTrackingSearch = '';
             kiwiSalesYearSearch = '';
             kiwiSalesStatusSearch = '';
             // 隐藏文章工具栏
@@ -3238,18 +3248,18 @@ function openProfileModal() {
                             " id="deleteKiwiSalesBtn">删除选中</button>
                         </div>
                     </div>
-                    <div style="display: flex; align-items: center; margin-bottom: 15px; gap: 10px; flex-wrap: wrap;">
-                        <div style="display: flex; align-items: center; gap: 8px;">
-                            <label style="font-size: 12px; color: #94a3b8;">年份：</label>
-                            <select id="kiwiSalesYearFilter" onchange="handleKiwiSearch()" style="padding: 8px 12px; border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 6px; background: rgba(30, 41, 59, 0.8); color: #cbd5e1; font-size: 12px;">
-                                <option value="">全部年份</option>
+                    <div style="display: flex; align-items: center; margin-bottom: 15px; gap: 6px; flex-wrap: nowrap;">
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <label style="font-size: 12px; color: #94a3b8; white-space: nowrap;">年份：</label>
+                            <select id="kiwiSalesYearFilter" onchange="handleKiwiSearch()" style="padding: 6px 8px; border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 6px; background: rgba(30, 41, 59, 0.8); color: #cbd5e1; font-size: 12px;">
+                                <option value="">全部</option>
                             </select>
                         </div>
-                        <div style="display: flex; align-items: center; gap: 8px;">
-                            <label style="font-size: 12px; color: #94a3b8;">客户名：</label>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <label style="font-size: 12px; color: #94a3b8; white-space: nowrap;">客户：</label>
                             <input type="text" id="kiwiCustomerSearch" style="
-                                width: 180px;
-                                padding: 8px 12px;
+                                width: 100px;
+                                padding: 6px 8px;
                                 border: 1px solid rgba(148, 163, 184, 0.2);
                                 border-radius: 6px;
                                 background: rgba(30, 41, 59, 0.8);
@@ -3257,11 +3267,11 @@ function openProfileModal() {
                                 font-size: 12px;
                             ">
                         </div>
-                        <div style="display: flex; align-items: center; gap: 8px;">
-                            <label style="font-size: 12px; color: #94a3b8;">客户电话：</label>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <label style="font-size: 12px; color: #94a3b8; white-space: nowrap;">电话：</label>
                             <input type="text" id="kiwiPhoneSearch" style="
-                                width: 180px;
-                                padding: 8px 12px;
+                                width: 100px;
+                                padding: 6px 8px;
                                 border: 1px solid rgba(148, 163, 184, 0.2);
                                 border-radius: 6px;
                                 background: rgba(30, 41, 59, 0.8);
@@ -3269,18 +3279,30 @@ function openProfileModal() {
                                 font-size: 12px;
                             ">
                         </div>
-                        <div style="display: flex; align-items: center; gap: 8px;">
-                            <label style="font-size: 12px; color: #94a3b8;">状态：</label>
-                            <select id="kiwiSalesStatusFilter" onchange="handleKiwiSearch()" style="padding: 8px 12px; border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 6px; background: rgba(30, 41, 59, 0.8); color: #cbd5e1; font-size: 12px;">
-                                <option value="">全部状态</option>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <label style="font-size: 12px; color: #94a3b8; white-space: nowrap;">运单号：</label>
+                            <input type="text" id="kiwiTrackingSearch" style="
+                                width: 120px;
+                                padding: 6px 8px;
+                                border: 1px solid rgba(148, 163, 184, 0.2);
+                                border-radius: 6px;
+                                background: rgba(30, 41, 59, 0.8);
+                                color: #cbd5e1;
+                                font-size: 12px;
+                            ">
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <label style="font-size: 12px; color: #94a3b8; white-space: nowrap;">状态：</label>
+                            <select id="kiwiSalesStatusFilter" onchange="handleKiwiSearch()" style="padding: 6px 8px; border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 6px; background: rgba(30, 41, 59, 0.8); color: #cbd5e1; font-size: 12px;">
+                                <option value="">全部</option>
                                 <option value="未发货">未发货</option>
                                 <option value="已发货">已发货</option>
                             </select>
                         </div>
-                        <button class="btn btn-secondary" onclick="handleKiwiSearch()" style="padding: 8px 16px; font-size: 12px; font-weight: 500; margin-left: 10px;">
+                        <button class="btn btn-secondary" onclick="handleKiwiSearch()" style="padding: 6px 12px; font-size: 12px; font-weight: 500;">
                             <i class="fa fa-search"></i> 搜索
                         </button>
-                        <button class="btn btn-secondary" onclick="resetKiwiSearch()" style="padding: 8px 16px; font-size: 12px; font-weight: 500; margin-left: 10px;">
+                        <button class="btn btn-secondary" onclick="resetKiwiSearch()" style="padding: 6px 12px; font-size: 12px; font-weight: 500;">
                             <i class="fa fa-refresh"></i> 重置
                         </button>
                     </div>

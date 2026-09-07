@@ -104,7 +104,9 @@ GET /api/kiwi-sales-report?page=1&page_size=10&year=2026
 | page_size | int | 每页数量 |
 | customer | string | 客户名模糊搜索 |
 | phone | string | 电话模糊搜索 |
+| tracking | string | 运单号模糊搜索 |
 | year | string | 年份筛选 |
+| status | string | 状态筛选（未发货/已发货） |
 
 ### GET /api/kiwi-sales-report
 | 参数 | 类型 | 说明 |

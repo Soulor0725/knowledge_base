@@ -426,6 +426,22 @@
   - Python 3.7+ 字典保持插入序，但显式维护 `customers_order` 列表更可靠
   - 搜索关键词：`报表顺序不对`、`排序混乱` → 检查 SQL `ORDER BY` 是否含时间字段
 
+### 🟢 功能增强：猕猴桃销售订单运单号查询
+
+- **版本**：v2.7.0
+- **现象**：用户需要按运单号快速查找订单，但查询栏缺少该筛选条件
+- **根因**：数据库已有 `tracking_number` 字段，但前端查询栏和后端 API 均未支持按运单号筛选
+- **修复**：
+  - 前端：在查询栏状态筛选框前新增运单号输入框，宽度 120px，与其他筛选项紧凑排列
+  - 后端：`GET /api/kiwi-sales` 新增 `tracking` 查询参数，SQL 使用 `tracking_number LIKE ?` 模糊匹配
+  - 前端 JS：`loadKiwiSales()`、`handleKiwiSearch()`、`resetKiwiSearch()`、`showKiwiSales()` 均同步更新
+- **教训**：
+  - 已有数据库字段但未暴露查询入口时，属于"功能缺失"而非"bug"
+  - 查询栏布局优化：`flex-wrap: nowrap` + 缩小输入框宽度（100-120px）+ 缩短标签文字，确保一行显示
+  - 搜索关键词：`筛选条件缺失` → 检查数据库字段是否都有对应的查询入口
+
+---
+
 ## 相关链接
 - [[architecture/overview]] - 系统架构总览
 - [[modules/auth]] - 认证模块
