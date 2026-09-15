@@ -10,7 +10,7 @@ P0 Smoke Test — 全模块核心冒烟
 """
 import pytest
 
-BASE = '/api'
+BASE = 'http://localhost:5001/api'
 
 
 @pytest.mark.p0

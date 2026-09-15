@@ -168,6 +168,7 @@ def init_db():
                 remark TEXT,
                 quantity INTEGER DEFAULT 0,
                 payment_amount REAL DEFAULT 0.00,
+                salesperson TEXT DEFAULT '',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 user_id INTEGER,
                 FOREIGN KEY (user_id) REFERENCES users (id)
@@ -191,6 +192,10 @@ def init_db():
         # 检查并添加status列（替换ship_date）
         if 'status' not in columns:
             cursor.execute("ALTER TABLE kiwi_sales ADD COLUMN status TEXT DEFAULT '未发货'")
+
+        # 检查并添加salesperson列（销售人）
+        if 'salesperson' not in columns:
+            cursor.execute("ALTER TABLE kiwi_sales ADD COLUMN salesperson TEXT DEFAULT ''")
 
         # 检查并添加 token_version 列（用于踢掉旧登录）
         cursor.execute("PRAGMA table_info(users)")

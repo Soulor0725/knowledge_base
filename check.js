@@ -967,6 +967,7 @@
         let kiwiSalesCustomerSearch = '';
         let kiwiSalesPhoneSearch = '';
         let kiwiSalesYearSearch = '';
+        let kiwiSalesSalespersonSearch = '';
         
         async function loadKiwiSales() {
             try {
@@ -979,6 +980,9 @@
                 }
                 if (kiwiSalesYearSearch) {
                     url += `&year=${kiwiSalesYearSearch}`;
+                }
+                if (kiwiSalesSalespersonSearch) {
+                    url += `&salesperson=${encodeURIComponent(kiwiSalesSalespersonSearch)}`;
                 }
                 const response = await fetchWithTimeout(url, {
                     headers: getAuthHeaders()
@@ -1000,6 +1004,7 @@
         function handleKiwiSearch() {
             kiwiSalesCustomerSearch = document.getElementById('kiwiCustomerSearch').value.trim();
             kiwiSalesPhoneSearch = document.getElementById('kiwiPhoneSearch').value.trim();
+            kiwiSalesSalespersonSearch = document.getElementById('kiwiSalespersonSearch').value.trim();
             const yearSelect = document.getElementById('kiwiSalesYearFilter');
             kiwiSalesYearSearch = yearSelect ? yearSelect.value : '';
             kiwiSalesCurrentPage = 1;
@@ -1010,12 +1015,14 @@
             // 清空搜索输入框
             document.getElementById('kiwiCustomerSearch').value = '';
             document.getElementById('kiwiPhoneSearch').value = '';
+            document.getElementById('kiwiSalespersonSearch').value = '';
             const yearSelect = document.getElementById('kiwiSalesYearFilter');
             if (yearSelect) yearSelect.value = '';
             // 重置搜索条件
             kiwiSalesCustomerSearch = '';
             kiwiSalesPhoneSearch = '';
             kiwiSalesYearSearch = '';
+            kiwiSalesSalespersonSearch = '';
             // 重新加载所有订单
             kiwiSalesCurrentPage = 1;
             loadKiwiSales();
@@ -1027,6 +1034,7 @@
             kiwiSalesCustomerSearch = '';
             kiwiSalesPhoneSearch = '';
             kiwiSalesYearSearch = '';
+            kiwiSalesSalespersonSearch = '';
             // 隐藏文章工具栏
             const toolbar = document.querySelector('.toolbar');
             if (toolbar) {
@@ -1105,6 +1113,18 @@
                                 font-size: 12px;
                             ">
                         </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <label style="font-size: 12px; color: #94a3b8;">销售人：</label>
+                            <input type="text" id="kiwiSalespersonSearch" style="
+                                width: 180px;
+                                padding: 8px 12px;
+                                border: 1px solid rgba(148, 163, 184, 0.2);
+                                border-radius: 6px;
+                                background: rgba(30, 41, 59, 0.8);
+                                color: #cbd5e1;
+                                font-size: 12px;
+                            ">
+                        </div>
                         <button class="btn btn-secondary" onclick="handleKiwiSearch()" style="padding: 8px 16px; font-size: 12px; font-weight: 500; margin-left: 10px;">
                             <i class="fa fa-search"></i> 搜索
                         </button>
@@ -1131,6 +1151,7 @@
                         <div class="main-header-remark" style="flex: 0.8; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">备注</div>
                         <div class="main-header-quantity" style="flex: 0.6; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">数量</div>
                         <div class="main-header-payment" style="flex: 0.8; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">支付金额</div>
+                        <div class="main-header-salesperson" style="flex: 0.8; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">销售人</div>
                         <div class="main-header-actions" style="flex: 0.8; font-weight: 600; color: #cbd5e1; font-size: 13px; text-align: center;">操作</div>
                     </div>
                     <div id="kiwiSalesTableBody"></div>
@@ -1190,6 +1211,7 @@
                     <div class="main-article-remark" style="flex: 0.8; color: #94a3b8; font-size: 12px; text-align: center;">${sale.remark || '-'}</div>
                     <div class="main-article-quantity" style="flex: 0.6; color: #94a3b8; font-size: 12px; text-align: center;">${sale.quantity || 0}</div>
                     <div class="main-article-payment" style="flex: 0.8; color: #2dd4bf; font-size: 12px; font-weight: 600; text-align: center;">${(sale.payment_amount || 0).toFixed(2)}</div>
+                    <div class="main-article-salesperson" style="flex: 0.8; color: #94a3b8; font-size: 12px; text-align: center;">${escapeHtml(sale.salesperson || '-')}</div>
                     <div class="main-article-actions" style="flex: 0.8; display: flex; gap: 6px; justify-content: center;">
                         <button class="action-icon-btn edit" onclick="editKiwiSale(${sale.id})" title="编辑订单"><i class="fa fa-pencil"></i></button>
                         <button class="action-icon-btn delete" onclick="deleteKiwiSale(${sale.id})" title="删除订单"><i class="fa fa-trash"></i></button>
@@ -1275,6 +1297,7 @@
         let kiwiReportPageSize = 5;
         let kiwiReportTotalPages = 1;
         let kiwiReportTotalCustomers = 0;
+        let kiwiReportSalespersonSummary = {};
         
         async function loadKiwiReport() {
             try {
@@ -1290,6 +1313,7 @@
                 kiwiReportPageSize = data.page_size || 10;
                 kiwiReportTotalPages = data.total_pages || 1;
                 kiwiReportTotalCustomers = data.total_customers || 0;
+                kiwiReportSalespersonSummary = data.salesperson_summary || {};
                 renderKiwiReportStats(data.summary);
                 renderKiwiReport();
             } catch (error) {
@@ -1302,6 +1326,50 @@
         function renderKiwiReportStats(summary) {
             const el = document.getElementById('kiwiReportStats');
             if (!el || !summary) return;
+            
+            // 构建销售人统计HTML
+            let salespersonHtml = '';
+            const spKeys = Object.keys(kiwiReportSalespersonSummary);
+            if (spKeys.length > 0) {
+                salespersonHtml = `
+                    <div style="margin-top:20px;">
+                        <div style="font-size:14px;font-weight:600;color:#cbd5e1;margin-bottom:12px;display:flex;align-items:center;gap:8px;">
+                            <i class="fa fa-users" style="color:#a855f7;"></i> 销售人统计
+                        </div>
+                        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;">`;
+                spKeys.forEach(sp => {
+                    const spData = kiwiReportSalespersonSummary[sp];
+                    const specKeys = Object.keys(spData.specs || {});
+                    let specTags = specKeys.map(s => 
+                        `<span style="display:inline-block;padding:3px 8px;background:rgba(168,85,247,0.15);border:1px solid rgba(168,85,247,0.25);border-radius:20px;font-size:11px;color:#c4b5fd;">${s} ${spData.specs[s].quantity}件</span>`
+                    ).join('');
+                    if (!specTags) specTags = '<span style="font-size:11px;color:#64748b;">暂无规格</span>';
+                    salespersonHtml += `
+                        <div style="background:linear-gradient(135deg,rgba(168,85,247,0.08) 0%,rgba(59,130,246,0.08) 100%);border:1px solid rgba(168,85,247,0.15);border-radius:12px;padding:16px 18px;transition:all 0.3s ease;" onmouseover="this.style.borderColor='rgba(168,85,247,0.4)';this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 12px rgba(168,85,247,0.15)'" onmouseout="this.style.borderColor='rgba(168,85,247,0.15)';this.style.transform='translateY(0)';this.style.boxShadow='none'">
+                            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+                                <div style="font-size:15px;font-weight:700;color:#e2e8f0;display:flex;align-items:center;gap:8px;">
+                                    <div style="width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#a855f7,#6366f1);display:flex;align-items:center;justify-content:center;color:white;font-size:13px;font-weight:700;">${escapeHtml(sp).charAt(0)}</div>
+                                    ${escapeHtml(sp)}
+                                </div>
+                            </div>
+                            <div style="display:flex;gap:16px;margin-bottom:12px;">
+                                <div style="flex:1;background:rgba(34,197,94,0.1);border-radius:8px;padding:10px 12px;text-align:center;">
+                                    <div style="font-size:22px;font-weight:800;color:#22c55e;line-height:1;">${spData.total_quantity}</div>
+                                    <div style="font-size:11px;color:#94a3b8;margin-top:4px;">数量</div>
+                                </div>
+                                <div style="flex:1;background:rgba(45,212,191,0.1);border-radius:8px;padding:10px 12px;text-align:center;">
+                                    <div style="font-size:22px;font-weight:800;color:#2dd4bf;line-height:1;">¥${spData.total_amount.toFixed(2)}</div>
+                                    <div style="font-size:11px;color:#94a3b8;margin-top:4px;">金额</div>
+                                </div>
+                            </div>
+                            <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                                ${specTags}
+                            </div>
+                        </div>`;
+                });
+                salespersonHtml += '</div></div>';
+            }
+            
             el.innerHTML = `
                 <div style="display:flex;gap:16px;flex-wrap:wrap;">
                     <div style="flex:1;min-width:140px;background:rgba(124,252,0,0.1);border:1px solid rgba(124,252,0,0.2);border-radius:10px;padding:16px;text-align:center;">
@@ -1321,6 +1389,7 @@
                         <div style="font-size:12px;color:#94a3b8;margin-top:4px;">总金额</div>
                     </div>
                 </div>
+                ${salespersonHtml}
             `;
         }
 
@@ -1529,6 +1598,7 @@
                     document.getElementById('kiwiStatus').value = sale.status || '未发货';
                     _$('kiwiQuantity').value = sale.quantity || 0;
                     _$('kiwiPaymentAmount').value = sale.payment_amount || 0.00;
+                    _$('kiwiSalesperson').value = sale.salesperson || '';
                     document.getElementById('kiwiSalesModalTitle').textContent = '编辑订单';
                 }
             }
@@ -1621,7 +1691,8 @@
                 tracking_number: trackingNumber,
                 remark: remark,
                 quantity: quantity,
-                payment_amount: paymentAmount
+                payment_amount: paymentAmount,
+                salesperson: _$('kiwiSalesperson').value.trim()
             };
             
             try {

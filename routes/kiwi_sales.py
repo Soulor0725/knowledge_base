@@ -77,6 +77,11 @@ def _validate_kiwi_sale_data(data):
     if status not in ['已发货', '未发货']:
         return (jsonify({'error': '状态必须是已发货或未发货'}), 400), None
 
+    # 销售人校验
+    salesperson = data.get('salesperson', '').strip()
+    if salesperson and len(salesperson) > 20:
+        return (jsonify({'error': '销售人不能超过20个字符'}), 400), None
+
     return None, {
         'customer_name': customer_name,
         'phone': phone,
@@ -87,6 +92,7 @@ def _validate_kiwi_sale_data(data):
         'quantity': quantity,
         'payment_amount': payment_amount,
         'status': status,
+        'salesperson': salesperson,
     }
 
 
@@ -108,6 +114,7 @@ def get_kiwi_sales():
     year = request.args.get('year', '', type=str)
     status = request.args.get('status', '', type=str)
     tracking = request.args.get('tracking', '', type=str)
+    salesperson = request.args.get('salesperson', '', type=str)
     
     # 构建查询
     conditions = ['user_id = ?']
@@ -135,6 +142,10 @@ def get_kiwi_sales():
         conditions.append('tracking_number LIKE ?')
         params.append(f'%{tracking}%')
     
+    if salesperson:
+        conditions.append('salesperson LIKE ?')
+        params.append(f'%{salesperson}%')
+    
     where_clause = 'WHERE ' + ' AND '.join(conditions)
     
     # 获取总数
@@ -143,7 +154,7 @@ def get_kiwi_sales():
     total = cursor.fetchone()[0]
     
     # 获取数据
-    data_query = f'''SELECT id, customer_name, phone, address, order_date, status, tracking_number, remark, quantity, payment_amount, created_at FROM kiwi_sales {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?'''
+    data_query = f'''SELECT id, customer_name, phone, address, order_date, status, tracking_number, remark, quantity, payment_amount, salesperson, created_at FROM kiwi_sales {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?'''
     params.extend([page_size, offset])
     cursor.execute(data_query, params)
     
@@ -174,11 +185,12 @@ def add_kiwi_sale():
     db = get_db()
     cursor = db.cursor()
     cursor.execute('''
-        INSERT INTO kiwi_sales (customer_name, phone, address, order_date, status, tracking_number, remark, quantity, payment_amount, user_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO kiwi_sales (customer_name, phone, address, order_date, status, tracking_number, remark, quantity, payment_amount, salesperson, user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (validated['customer_name'], validated['phone'], validated['address'],
           validated['order_date'], validated['status'], validated['tracking_number'],
-          validated['remark'], validated['quantity'], validated['payment_amount'], g.user_id))
+          validated['remark'], validated['quantity'], validated['payment_amount'],
+          validated['salesperson'], g.user_id))
     err = safe_commit(db)
     if err:
         return err
@@ -203,11 +215,12 @@ def update_kiwi_sale(sale_id):
     db = get_db()
     cursor = db.cursor()
     cursor.execute('''
-        UPDATE kiwi_sales SET customer_name=?, phone=?, address=?, order_date=?, status=?, tracking_number=?, remark=?, quantity=?, payment_amount=?
+        UPDATE kiwi_sales SET customer_name=?, phone=?, address=?, order_date=?, status=?, tracking_number=?, remark=?, quantity=?, payment_amount=?, salesperson=?
         WHERE id=? AND user_id=?
     ''', (validated['customer_name'], validated['phone'], validated['address'],
           validated['order_date'], validated['status'], validated['tracking_number'],
-          validated['remark'], validated['quantity'], validated['payment_amount'], sale_id, g.user_id))
+          validated['remark'], validated['quantity'], validated['payment_amount'],
+          validated['salesperson'], sale_id, g.user_id))
     if cursor.rowcount == 0:
         return jsonify({'error': '记录不存在'}), 404
     err = safe_commit(db)
@@ -346,6 +359,38 @@ def get_kiwi_sales_report():
 
     summary_output = {k: {'quantity': v['quantity'], 'amount': round(v['amount'], 2)} for k, v in summary.items()}
 
+    # 按销售人分组统计数量、规格、总金额
+    cursor.execute(f'''
+        SELECT salesperson, remark, SUM(quantity) as total_quantity, SUM(payment_amount) as total_amount
+        FROM kiwi_sales
+        WHERE user_id = ? {year_filter}
+        GROUP BY salesperson, remark
+    ''', (g.user_id,) + tuple(year_params))
+    sp_rows = cursor.fetchall()
+    salesperson_stats = {}
+    for row in sp_rows:
+        sp = row['salesperson'] or '未指定'
+        remark = row['remark'] or '其他'
+        qty = row['total_quantity'] or 0
+        amt = row['total_amount'] or 0
+        if sp not in salesperson_stats:
+            salesperson_stats[sp] = {'total_quantity': 0, 'total_amount': 0, 'specs': {}}
+        salesperson_stats[sp]['total_quantity'] += qty
+        salesperson_stats[sp]['total_amount'] += amt
+        if remark not in salesperson_stats[sp]['specs']:
+            salesperson_stats[sp]['specs'][remark] = {'quantity': 0, 'amount': 0}
+        salesperson_stats[sp]['specs'][remark]['quantity'] += qty
+        salesperson_stats[sp]['specs'][remark]['amount'] += amt
+
+    # 序列化销售人统计
+    salesperson_summary = {}
+    for sp, data in salesperson_stats.items():
+        salesperson_summary[sp] = {
+            'total_quantity': data['total_quantity'],
+            'total_amount': round(data['total_amount'], 2),
+            'specs': {k: {'quantity': v['quantity'], 'amount': round(v['amount'], 2)} for k, v in data['specs'].items()}
+        }
+
     return jsonify({
         'report': report_data,
         'page': page,
@@ -356,7 +401,8 @@ def get_kiwi_sales_report():
             **summary_output,
             'total_quantity': total_quantity,
             'total_amount': round(total_amount, 2)
-        }
+        },
+        'salesperson_summary': salesperson_summary
     })
 
 
@@ -383,7 +429,7 @@ def export_kiwi_sales():
                 return jsonify({'error': 'ids必须为整数列表'}), 400
             placeholders = ','.join(['?'] * len(ids))
             params = list(ids) + [g.user_id]
-            cursor.execute(f'''SELECT id, customer_name, phone, address, order_date, status, tracking_number, remark, quantity, payment_amount 
+            cursor.execute(f'''SELECT id, customer_name, phone, address, order_date, status, tracking_number, remark, quantity, payment_amount, salesperson 
                               FROM kiwi_sales WHERE id IN ({placeholders}) AND user_id = ? ORDER BY created_at DESC''', params)
         else:
             customer = request.args.get('customer', '', type=str)
@@ -407,7 +453,7 @@ def export_kiwi_sales():
                 conditions.append('status = ?')
                 params.append(status)
             where_clause = 'WHERE ' + ' AND '.join(conditions)
-            cursor.execute(f'''SELECT id, customer_name, phone, address, order_date, status, tracking_number, remark, quantity, payment_amount 
+            cursor.execute(f'''SELECT id, customer_name, phone, address, order_date, status, tracking_number, remark, quantity, payment_amount, salesperson 
                               FROM kiwi_sales {where_clause} ORDER BY created_at DESC LIMIT 10000''', params)
         
         rows = fetchall_dicts(cursor)
@@ -416,7 +462,7 @@ def export_kiwi_sales():
 
         output = io.StringIO()
         writer = csv.writer(output, lineterminator='\n')
-        writer.writerow(['序号', '客户名', '电话', '地址', '接单日期', '状态', '运单号', '规格', '数量', '支付金额'])
+        writer.writerow(['序号', '客户名', '电话', '地址', '接单日期', '状态', '运单号', '规格', '数量', '支付金额', '销售人'])
         for idx, r in enumerate(rows):
             writer.writerow([
                 idx + 1,
@@ -428,7 +474,8 @@ def export_kiwi_sales():
                 sanitize_csv_field(r['tracking_number'] or ''),
                 sanitize_csv_field(r['remark'] or ''),
                 r['quantity'] or 0,
-                (r['payment_amount'] or 0)
+                (r['payment_amount'] or 0),
+                sanitize_csv_field(r['salesperson'] or '')
             ])
 
         date_str = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')
