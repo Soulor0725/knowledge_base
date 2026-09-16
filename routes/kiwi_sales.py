@@ -406,6 +406,61 @@ def get_kiwi_sales_report():
     })
 
 
+@kiwi_sales_bp.route('/kiwi-order-source', methods=['GET'])
+@login_required
+def get_order_source():
+    db = get_db()
+    cursor = db.cursor()
+    
+    # 获取年份筛选参数
+    year = request.args.get('year', '', type=str)
+    
+    # 构建年份筛选条件
+    year_filter = ''
+    year_params = []
+    if year:
+        yr_start, yr_end = year_to_range(year)
+        if yr_start and yr_end:
+            year_filter = 'AND order_date >= ? AND order_date < ?'
+            year_params = [yr_start, yr_end]
+    
+    # 按销售人分组统计数量、规格、总金额
+    cursor.execute(f'''
+        SELECT salesperson, remark, SUM(quantity) as total_quantity, SUM(payment_amount) as total_amount
+        FROM kiwi_sales
+        WHERE user_id = ? {year_filter}
+        GROUP BY salesperson, remark
+    ''', (g.user_id,) + tuple(year_params))
+    sp_rows = cursor.fetchall()
+    salesperson_stats = {}
+    for row in sp_rows:
+        sp = row['salesperson'] or '未指定'
+        remark = row['remark'] or '其他'
+        qty = row['total_quantity'] or 0
+        amt = row['total_amount'] or 0
+        if sp not in salesperson_stats:
+            salesperson_stats[sp] = {'total_quantity': 0, 'total_amount': 0, 'specs': {}}
+        salesperson_stats[sp]['total_quantity'] += qty
+        salesperson_stats[sp]['total_amount'] += amt
+        if remark not in salesperson_stats[sp]['specs']:
+            salesperson_stats[sp]['specs'][remark] = {'quantity': 0, 'amount': 0}
+        salesperson_stats[sp]['specs'][remark]['quantity'] += qty
+        salesperson_stats[sp]['specs'][remark]['amount'] += amt
+
+    # 序列化销售人统计
+    salesperson_summary = {}
+    for sp, data in salesperson_stats.items():
+        salesperson_summary[sp] = {
+            'total_quantity': data['total_quantity'],
+            'total_amount': round(data['total_amount'], 2),
+            'specs': {k: {'quantity': v['quantity'], 'amount': round(v['amount'], 2)} for k, v in data['specs'].items()}
+        }
+
+    return jsonify({
+        'salesperson_summary': salesperson_summary
+    })
+
+
 @kiwi_sales_bp.route('/kiwi-sales/export', methods=['GET', 'POST'])
 @login_required
 def export_kiwi_sales():

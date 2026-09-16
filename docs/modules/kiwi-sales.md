@@ -13,6 +13,7 @@
 | DELETE | `/api/kiwi-sales/:id` | 删除订单 |
 | POST | `/api/kiwi-sales/batch-delete` | 批量删除 |
 | GET | `/api/kiwi-sales-report` | 报表统计 |
+| GET | `/api/kiwi-order-source` | 订单来源统计 |
 | GET | `/api/kiwi-sales/export` | 导出 CSV |
 
 ## 请求/响应示例
@@ -69,6 +70,35 @@ GET /api/kiwi-sales-report?page=1&page_size=10&year=2026
 }
 ```
 
+### 订单来源统计
+**请求**
+```
+GET /api/kiwi-order-source?year=2026
+```
+**响应** (200)
+```json
+{
+  "salesperson_summary": {
+    "张三": {
+      "total_quantity": 50,
+      "total_amount": 2500.00,
+      "specs": {
+        "5斤装": {"quantity": 30, "amount": 1500.00},
+        "10斤装": {"quantity": 20, "amount": 1000.00}
+      }
+    },
+    "李四": {
+      "total_quantity": 30,
+      "total_amount": 1200.00,
+      "specs": {
+        "5斤装": {"quantity": 20, "amount": 800.00},
+        "10斤装": {"quantity": 10, "amount": 400.00}
+      }
+    }
+  }
+}
+```
+
 ## 业务规则
 
 ### 订单校验
@@ -89,6 +119,11 @@ GET /api/kiwi-sales-report?page=1&page_size=10&year=2026
 - 支持年份筛选
 - 分页显示（按客户分组）
 - 汇总：按规格统计数量和金额
+
+### 订单来源
+- 按销售人分组统计订单数量和金额
+- 支持年份筛选
+- 展示每个销售人的规格明细
 
 ### 导出
 - CSV 格式（GBK 编码，支持 Excel 打开）
@@ -113,6 +148,11 @@ GET /api/kiwi-sales-report?page=1&page_size=10&year=2026
 |------|------|------|
 | page | int | 页码 |
 | page_size | int | 每页数量 |
+| year | string | 年份筛选 |
+
+### GET /api/kiwi-order-source
+| 参数 | 类型 | 说明 |
+|------|------|------|
 | year | string | 年份筛选 |
 
 ### GET /api/kiwi-sales/export

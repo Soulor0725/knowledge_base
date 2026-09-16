@@ -1,6 +1,6 @@
 # 智慧管理中心 (Echo) 知识库
 
-> 最后更新：2026-07-11
+> 最后更新：2026-09-16
 
 ## 快速导航
 
@@ -17,7 +17,7 @@
 ### 模块文档
 - [[modules/auth]] - 认证模块
 - [[modules/articles]] - 文章模块
-- [[modules/kiwi-sales]] - 猕猴桃销售
+- [[modules/kiwi-sales]] - 猕猴桃销售（含订单来源）
 - [[modules/overtime]] - 加班记录
 - [[modules/expenses]] - 记账模块
 
@@ -41,7 +41,7 @@
 | 属性 | 值 |
 |------|-----|
 | 项目名称 | 智慧管理中心 (Echo) |
-| 版本 | v2.5.7 |
+| 版本 | v2.6.8 |
 | 技术栈 | Flask + Vanilla JS + SQLite |
 | 主要文件 | `app.py`, `static/index.html` |
 
