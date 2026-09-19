@@ -369,7 +369,7 @@ def get_kiwi_sales_report():
     sp_rows = cursor.fetchall()
     salesperson_stats = {}
     for row in sp_rows:
-        sp = row['salesperson'] or '未指定'
+        sp = (row['salesperson'] or '').strip() or '未指定'
         remark = row['remark'] or '其他'
         qty = row['total_quantity'] or 0
         amt = row['total_amount'] or 0
@@ -434,7 +434,7 @@ def get_order_source():
     sp_rows = cursor.fetchall()
     salesperson_stats = {}
     for row in sp_rows:
-        sp = row['salesperson'] or '未指定'
+        sp = (row['salesperson'] or '').strip() or '未指定'
         remark = row['remark'] or '其他'
         qty = row['total_quantity'] or 0
         amt = row['total_amount'] or 0
